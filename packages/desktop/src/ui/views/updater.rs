@@ -19,7 +19,7 @@ use crate::ui::theme;
 const LATEST_MANIFEST: &str =
     "https://github.com/noverwork/noverdbee/releases/latest/download/latest.json";
 /// The updater key's public half, as the Tauri app embedded it.
-const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE4MEMzRjE2MjBBMjcyNDEKUldSQmNxSWdGajhNR0V1ay92YWgzcFlMRG4rMENNeDFEQWZoMEMweXg0Um5PUGYySEpSaURLWjAK";
+const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMxRDU4RkNDNkE3MTRFQ0UKUldUT1RuRnF6SS9Wd1ZvK2hFQi9FeC9NNERXRkMxT2dhY3ZhaXhNL0NRL2E5U3pmRmtkeFVHaWEK";
 
 #[derive(Clone, serde::Deserialize)]
 pub struct Release {
