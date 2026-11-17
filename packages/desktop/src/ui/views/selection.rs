@@ -186,7 +186,7 @@ pub fn cell_area<D: Selectable>(
         .flex()
         .items_center()
         .px_2()
-        .when(picked, |cell| cell.bg(theme::wash()))
+        .when(picked, |cell| cell.bg(theme::picked()))
         .child(div().w_full().min_w_0().child(content))
         .on_mouse_down(
             MouseButton::Left,

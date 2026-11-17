@@ -53,6 +53,11 @@ pub const fn wash() -> Rgba {
     white(0.05)
 }
 
+/// Picked cells in the grids: clearly brighter than the hover wash.
+pub const fn picked() -> Rgba {
+    Rgba { a: 0.16, ..STENCIL }
+}
+
 /// `amount` of `color` mixed into `base`.
 pub fn mix(color: Rgba, base: Rgba, amount: f32) -> Rgba {
     let channel = |color: f32, base: f32| color * amount + base * (1. - amount);
