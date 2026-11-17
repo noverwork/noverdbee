@@ -199,6 +199,37 @@ mod shots {
         stage.settle(Duration::from_millis(500));
         stage.shoot("navigator");
 
+        // The open connection got an editor; run SQL in it, then SQL that fails.
+        for (name, sql) in [
+            (
+                "editor-results",
+                "SELECT c.name, c.email, o.total, o.note\nFROM orders o\nJOIN customers c ON c.id = o.customer_id\nORDER BY o.total DESC;",
+            ),
+            (
+                "editor-error",
+                "UPDATE orders SET note = 'checked' WHERE total > 100;\nSELECT * FROM orders WHERE;",
+            ),
+        ] {
+            stage
+                .cx
+                .update_window(stage.window, |_, window, cx| {
+                    let shell = gpui_kit::base::Root::read(window, cx)
+                        .view()
+                        .clone()
+                        .downcast::<ui::shell::Shell>()
+                        .expect("the window shows the shell");
+                    let workspace = shell.read(cx).workspace().expect("the workspace is open");
+                    let editor = workspace.read(cx).active_editor().expect("an editor is open");
+                    editor.update(cx, |editor, cx| {
+                        editor.set_text(sql, window, cx);
+                        editor.run(window, cx);
+                    });
+                })
+                .ok();
+            stage.settle(Duration::from_millis(500));
+            stage.shoot(name);
+        }
+
         for (name, route) in [
             ("connection-new", Route::ConnectionForm(None)),
             ("connection-edit", Route::ConnectionForm(Some(shop))),

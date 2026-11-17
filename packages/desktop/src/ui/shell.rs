@@ -172,20 +172,29 @@ impl Shell {
             Route::Databases | Route::ConnectionForm(_) => (t("Databases"), "database"),
             Route::Settings => (t("Settings"), "settings"),
         };
-        h_flex().h_9().flex_shrink_0().px_2().bg(theme::RIB).child(
-            h_flex()
-                .h_7()
-                .gap_2()
-                .px_2p5()
-                .rounded(theme::RADIUS)
-                .border_1()
-                .border_color(theme::STENCIL)
-                .text_size(px(11.))
-                .text_color(theme::STENCIL)
-                .child(lucide(icon).size_3p5().text_color(theme::STENCIL_DIM))
-                .child(SharedString::from(label.to_uppercase())),
-        )
+        h_flex()
+            .h_9()
+            .flex_shrink_0()
+            .px_2()
+            .bg(theme::RIB)
+            .child(page_label(label, icon))
     }
+}
+
+/// The outlined cell at the left of the top bar that names the page.
+pub fn page_label(label: SharedString, icon: &'static str) -> Div {
+    h_flex()
+        .h_7()
+        .flex_shrink_0()
+        .gap_2()
+        .px_2p5()
+        .rounded(theme::RADIUS)
+        .border_1()
+        .border_color(theme::STENCIL)
+        .text_size(px(11.))
+        .text_color(theme::STENCIL)
+        .child(lucide(icon).size_3p5().text_color(theme::STENCIL_DIM))
+        .child(SharedString::from(label.to_uppercase()))
 }
 
 /// A 40x28 icon button in the sidebar rail.
@@ -294,7 +303,9 @@ impl Render for Shell {
                     .h_full()
                     .flex_1()
                     .min_w_0()
-                    .child(self.render_header(cx))
+                    .when(route != Route::Databases, |column| {
+                        column.child(self.render_header(cx))
+                    })
                     .child(
                         div()
                             .relative()

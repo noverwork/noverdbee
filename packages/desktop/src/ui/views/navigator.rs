@@ -32,6 +32,10 @@ pub enum ConnectionState {
 }
 
 pub enum NavigatorEvent {
+    /// A connection finished opening.
+    Connected { connection: String },
+    /// The user asked for a SQL editor on a connection.
+    NewEditor { connection: String },
     /// The user asked to see a table's rows.
     OpenTable { connection: String, table: TableRef },
 }
@@ -112,6 +116,17 @@ impl Navigator {
         self.states.get(connection)
     }
 
+    /// How many connections are open, and how many failed to open.
+    pub fn counts(&self) -> (usize, usize) {
+        let count = |wanted: fn(&ConnectionState) -> bool| {
+            self.states.values().filter(|state| wanted(state)).count()
+        };
+        (
+            count(|state| matches!(state, ConnectionState::Live(_))),
+            count(|state| matches!(state, ConnectionState::Failed(_))),
+        )
+    }
+
     /// Opens the connection and loads its tables.
     pub fn connect(&mut self, id: String, cx: &mut Context<Self>) {
         let Some(record) = self.store.read(cx).connection(&id).cloned() else {
@@ -128,7 +143,12 @@ impl Navigator {
             .await;
             let _ = this.update(cx, |this, cx| {
                 let state = match loaded {
-                    Ok(tables) => ConnectionState::Live(Rc::new(tables)),
+                    Ok(tables) => {
+                        cx.emit(NavigatorEvent::Connected {
+                            connection: id.clone(),
+                        });
+                        ConnectionState::Live(Rc::new(tables))
+                    }
                     Err(error) => ConnectionState::Failed(error.into()),
                 };
                 this.states.insert(id, state);
@@ -344,20 +364,20 @@ fn table_item(
 
 /// One shape per connection state: a dot when live, a ring while connecting,
 /// the HELD seal when it failed.
-pub fn state_shape(state: Option<&ConnectionState>) -> AnyElement {
+pub fn state_shape(state: Option<&ConnectionState>, color: Rgba) -> AnyElement {
     match state {
         Some(ConnectionState::Live(_)) => div()
             .size_2()
             .flex_shrink_0()
             .rounded_full()
-            .bg(theme::STENCIL)
+            .bg(color)
             .into_any_element(),
         Some(ConnectionState::Connecting) => div()
             .size_2()
             .flex_shrink_0()
             .rounded_full()
             .border_2()
-            .border_color(theme::STENCIL)
+            .border_color(color)
             .into_any_element(),
         Some(ConnectionState::Failed(_)) => div()
             .flex_shrink_0()
@@ -428,7 +448,7 @@ fn render_row(entry: &TreeEntry, node: Option<&Node>, selected: bool) -> ListIte
         Some(Node::Connection { state, .. }) => row
             .child(icon("database"))
             .child(label.text_color(theme::STENCIL))
-            .child(state_shape(state.as_ref())),
+            .child(state_shape(state.as_ref(), theme::STENCIL)),
         Some(Node::Table { kind, .. }) => row
             .child(icon(match kind {
                 ObjectKind::Table => "table-2",
@@ -546,6 +566,16 @@ impl Render for Navigator {
                         },
                     )
                 };
+                let editor = {
+                    let (navigator, id) = (navigator.clone(), id.clone());
+                    PopupMenuItem::new(t("New SQL editor")).on_click(move |_, _, cx| {
+                        navigator.update(cx, |_, cx| {
+                            cx.emit(NavigatorEvent::NewEditor {
+                                connection: id.clone(),
+                            })
+                        });
+                    })
+                };
                 let edit = {
                     let id = id.clone();
                     PopupMenuItem::new(t("Edit")).on_click(move |_, _, cx| {
@@ -558,7 +588,11 @@ impl Render for Navigator {
                     let record = record.clone();
                     navigator.update(cx, |this, cx| this.delete(record, window, cx));
                 });
-                menu.item(toggle).item(edit).separator().item(delete)
+                menu.item(toggle)
+                    .item(editor)
+                    .separator()
+                    .item(edit)
+                    .item(delete)
             })
             .into_any_element()
         };

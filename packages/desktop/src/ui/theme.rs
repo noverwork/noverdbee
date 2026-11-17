@@ -1,5 +1,8 @@
 //! The app's own palette (see DESIGN.md), applied over the component theme.
 
+use std::sync::Arc;
+
+use gpui_kit::component::highlighter::HighlightTheme;
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{px, App, Rgba};
 
@@ -21,6 +24,8 @@ const fn white(alpha: f32) -> Rgba {
     }
 }
 
+/// The SQL editor's surface: pure black, never tinted.
+pub const INK: Rgba = hex(0x000000);
 pub const PORT: Rgba = hex(0x101317);
 pub const RAIL: Rgba = hex(0x0b0e11);
 pub const RIB: Rgba = hex(0x1a1f25);
@@ -47,10 +52,41 @@ pub const fn wash() -> Rgba {
     white(0.05)
 }
 
+/// `amount` of `color` mixed into `base`.
+pub fn mix(color: Rgba, base: Rgba, amount: f32) -> Rgba {
+    let channel = |color: f32, base: f32| color * amount + base * (1. - amount);
+    Rgba {
+        r: channel(color.r, base.r),
+        g: channel(color.g, base.g),
+        b: channel(color.b, base.b),
+        a: 1.,
+    }
+}
+
 pub const RADIUS: gpui_kit::Pixels = px(2.);
 
 /// The bundled font, loaded in `ui::init`.
 pub const FONT_FAMILY: &str = "Sarasa Term TC SemiBold";
+
+/// SQL colours: the stencil ramp plus ochre for strings, per DESIGN.md.
+const SYNTAX: &str = r##"{
+    "name": "Container Stencil",
+    "appearance": "dark",
+    "style": {
+        "editor.background": "#000000",
+        "editor.foreground": "#c1beb5",
+        "editor.active_line.background": "#ffffff0d",
+        "editor.line_number": "#82807b",
+        "editor.active_line_number": "#c1beb5",
+        "syntax": {
+            "keyword": { "color": "#e8e4d8" },
+            "number": { "color": "#e8e4d8" },
+            "boolean": { "color": "#e8e4d8" },
+            "string": { "color": "#e6c27a" },
+            "comment": { "color": "#82807b" }
+        }
+    }
+}"##;
 
 pub fn apply(cx: &mut App) {
     Theme::change(ThemeMode::Dark, None, cx);
@@ -92,5 +128,8 @@ pub fn apply(cx: &mut App) {
         theme.scrollbar_thumb = Rgba { a: 0.26, ..STENCIL }.into();
         theme.scrollbar_thumb_hover = Rgba { a: 0.42, ..STENCIL }.into();
         theme.selection = Rgba { a: 0.28, ..STENCIL }.into();
+        theme.highlight_theme = Arc::new(
+            serde_json::from_str::<HighlightTheme>(SYNTAX).expect("the syntax theme is valid"),
+        );
     });
 }
