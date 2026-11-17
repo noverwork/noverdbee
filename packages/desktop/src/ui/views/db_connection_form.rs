@@ -6,9 +6,10 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::select::{Select, SelectEvent};
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{h_flex, v_flex, Disableable as _};
+use gpui_kit::component::{h_flex, v_flex, Disableable as _, Sizable as _};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use shared::DbConnectionRecord;
+use shared::{DbConnectionRecord, Environment};
 
 use crate::db::{Session, SessionManager, DRIVER_POSTGRES, DRIVER_SQLITE};
 use crate::ui::bridge::backend;
@@ -62,6 +63,7 @@ pub struct DbConnectionForm {
     driver: Entity<ChoiceSelect>,
     name: Entity<InputState>,
     group: Entity<InputState>,
+    environment: Entity<ChoiceSelect>,
     path: Entity<InputState>,
     read_only: bool,
     host: Entity<InputState>,
@@ -78,7 +80,13 @@ pub struct DbConnectionForm {
 }
 
 impl DbConnectionForm {
-    pub fn new(id: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// Edits connection `id`, or adds one, in `group` when given.
+    pub fn new(
+        id: Option<String>,
+        group: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let store = store(cx);
         let (existing, group_name) = {
             let store = store.read(cx);
@@ -88,6 +96,7 @@ impl DbConnectionForm {
                 .and_then(|record| record.group_id.as_deref())
                 .and_then(|group_id| store.groups.iter().find(|group| group.id == group_id))
                 .map(|group| group.name.clone())
+                .or(group)
                 .unwrap_or_default();
             let new = DbConnectionRecord {
                 driver: DRIVER_SQLITE.to_string(),
@@ -118,6 +127,16 @@ impl DbConnectionForm {
             window,
             cx,
         );
+        let environment = common::new_select(
+            Environment::ALL
+                .map(|environment| {
+                    Choice::new(environment.as_str(), environment_label(environment))
+                })
+                .to_vec(),
+            existing.environment.as_str(),
+            window,
+            cx,
+        );
         // Switching driver swaps the sections and clears their messages.
         let _subscriptions =
             vec![
@@ -141,7 +160,8 @@ impl DbConnectionForm {
         };
         Self {
             name: input(existing.name, "orders"),
-            group: input(group_name, "production"),
+            group: input(group_name, "analytics"),
+            environment,
             path: input(existing.path, "/path/to/database.db"),
             host: input(existing.host, "localhost"),
             port: input(port.to_string(), "5432"),
@@ -175,6 +195,9 @@ impl DbConnectionForm {
         let shared = DbConnectionRecord {
             id: self.id.clone().unwrap_or_default(),
             name: text(&self.name),
+            environment: Environment::parse(
+                &common::selected(&self.environment, cx).unwrap_or_default(),
+            ),
             ..DbConnectionRecord::default()
         };
         if self.is_postgres(cx) {
@@ -347,6 +370,34 @@ impl DbConnectionForm {
             )
     }
 
+    /// The group field, with the existing groups to pick from so a typo does
+    /// not start a second group.
+    fn render_group(&self, cx: &Context<Self>) -> Div {
+        let groups = &self.store.read(cx).groups;
+        v_flex()
+            .gap_2()
+            .child(Input::new(&self.group))
+            .when(!groups.is_empty(), |field| {
+                field.child(
+                    h_flex()
+                        .flex_wrap()
+                        .gap_1()
+                        .children(groups.iter().map(|group| {
+                            let name = group.name.clone();
+                            Button::new(SharedString::from(format!("group-{}", group.id)))
+                                .outline()
+                                .xsmall()
+                                .label(group.name.clone())
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    let name = name.clone();
+                                    this.group
+                                        .update(cx, |input, cx| input.set_value(name, window, cx));
+                                }))
+                        })),
+                )
+            })
+    }
+
     fn render_server(&self) -> Div {
         common::form_section("server", t("Server"), None)
             .child(
@@ -387,6 +438,15 @@ impl DbConnectionForm {
     }
 }
 
+fn environment_label(environment: Environment) -> SharedString {
+    match environment {
+        Environment::Local => t("Local"),
+        Environment::Development => t("Development"),
+        Environment::Staging => t("Staging"),
+        Environment::Production => t("Production"),
+    }
+}
+
 impl Render for DbConnectionForm {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let title = if self.id.is_some() {
@@ -405,7 +465,12 @@ impl Render for DbConnectionForm {
                 Input::new(&self.name),
                 self.errors.name.map(t),
             ))
-            .child(common::field(t("Group"), Input::new(&self.group), None));
+            .child(common::field(
+                t("Environment"),
+                Select::new(&self.environment),
+                None,
+            ))
+            .child(common::field(t("Group"), self.render_group(cx), None));
         let details = if self.is_postgres(cx) {
             self.render_server()
         } else {

@@ -224,18 +224,11 @@ impl Workspace {
     fn identity(&self, connection: &str, cx: &App) -> Identity {
         let store = self.store.read(cx);
         let record = store.connection(connection);
-        let group = record
-            .and_then(|record| record.group_id.as_deref())
-            .and_then(|id| store.groups.iter().find(|group| group.id == id));
-        let (line, dark_text) =
-            stencil::line_color(group.map_or("", |group| group.id.as_str()), &store.groups);
-        let prefix = group.map_or_else(
-            || "DB".to_string(),
-            |group| stencil::group_prefix(&group.name),
-        );
+        let environment = record.map(|record| record.environment).unwrap_or_default();
+        let (line, dark_text) = stencil::line_color(environment);
         let name = record.map_or("", |record| record.name.as_str());
         Identity {
-            code: format!("{prefix}·{}", name.to_uppercase()).into(),
+            code: format!("{}·{}", stencil::code(environment), name.to_uppercase()).into(),
             line,
             dark_text,
         }
