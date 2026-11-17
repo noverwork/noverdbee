@@ -3,8 +3,9 @@
 //! open survives a visit to another page.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::resizable::{h_resizable, resizable_panel};
-use gpui_kit::component::{h_flex, v_flex, Disableable as _, Sizable as _};
+use gpui_kit::component::{h_flex, v_flex, Disableable as _, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -93,6 +94,10 @@ impl Workspace {
                             this.open_editor(connection.clone(), window, cx);
                         }
                     }
+                    NavigatorEvent::Failed { name, error } => window.push_notification(
+                        Notification::error(error.clone()).title(name.clone()),
+                        cx,
+                    ),
                     NavigatorEvent::OpenTable { connection, table } => {
                         this.open_table(connection.clone(), table.clone(), window, cx)
                     }

@@ -8,6 +8,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::tree::{tree, TreeEntry, TreeEvent, TreeItem, TreeState};
 use gpui_kit::component::{h_flex, v_flex, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -34,6 +35,8 @@ pub enum ConnectionState {
 pub enum NavigatorEvent {
     /// A connection finished opening.
     Connected { connection: String },
+    /// A connection could not be opened.
+    Failed { name: String, error: String },
     /// The user asked for a SQL editor on a connection.
     NewEditor { connection: String },
     /// The user asked to see a table's rows.
@@ -61,8 +64,8 @@ enum Node {
         type_name: SharedString,
         primary_key: bool,
     },
-    /// A line of text under a connection: an error, or "no tables".
-    Note { failed: bool },
+    /// A line of text under a connection: "no tables".
+    Note,
 }
 
 pub struct Navigator {
@@ -135,6 +138,7 @@ impl Navigator {
         self.states.insert(id.clone(), ConnectionState::Connecting);
         self.rebuild(cx);
         let app = self.store.read(cx).app();
+        let name = record.name.clone();
         cx.spawn(async move |this, cx| {
             let loaded = backend(async move {
                 let session = app.state::<SessionManager>().connect(&record).await?;
@@ -149,7 +153,13 @@ impl Navigator {
                         });
                         ConnectionState::Live(Rc::new(tables))
                     }
-                    Err(error) => ConnectionState::Failed(error.into()),
+                    Err(error) => {
+                        cx.emit(NavigatorEvent::Failed {
+                            name,
+                            error: error.clone(),
+                        });
+                        ConnectionState::Failed(error.into())
+                    }
                 };
                 this.states.insert(id, state);
                 this.rebuild(cx);
@@ -270,17 +280,12 @@ impl Navigator {
         let id = SharedString::from(format!("connection:{}", connection.id));
         let state = self.states.get(&connection.id).cloned();
         let mut children = Vec::new();
-        let mut note = |text: SharedString, failed: bool, children: &mut Vec<TreeItem>| {
-            let note_id = SharedString::from(format!("note:{}", connection.id));
-            nodes.insert(note_id.clone(), Node::Note { failed });
-            children.push(TreeItem::new(note_id, text));
-        };
-        match &state {
-            Some(ConnectionState::Failed(error)) => note(error.clone(), true, &mut children),
-            Some(ConnectionState::Live(tables)) if tables.is_empty() => {
-                note(t("No tables"), false, &mut children)
+        if let Some(ConnectionState::Live(tables)) = &state {
+            if tables.is_empty() {
+                let note_id = SharedString::from(format!("note:{}", connection.id));
+                nodes.insert(note_id.clone(), Node::Note);
+                children.push(TreeItem::new(note_id, t("No tables")));
             }
-            _ => {}
         }
         if let Some(ConnectionState::Live(tables)) = &state {
             for table in tables.iter() {
@@ -445,10 +450,24 @@ fn render_row(entry: &TreeEntry, node: Option<&Node>, selected: bool) -> ListIte
             .child(label.text_color(theme::STENCIL))
             .child(chip(code.clone()))
             .child(chip(count.to_string()).text_color(theme::STENCIL_MUTE)),
-        Some(Node::Connection { state, .. }) => row
+        Some(Node::Connection { id, state }) => row
             .child(icon("database"))
             .child(label.text_color(theme::STENCIL))
-            .child(state_shape(state.as_ref(), theme::STENCIL)),
+            .child(match state {
+                // A seal dot; the reason waits in its tooltip.
+                Some(ConnectionState::Failed(error)) => {
+                    let error = error.clone();
+                    div()
+                        .id(SharedString::from(format!("failed:{id}")))
+                        .size_2()
+                        .flex_shrink_0()
+                        .rounded_full()
+                        .bg(theme::SEAL)
+                        .tooltip(move |window, cx| Tooltip::new(error.clone()).build(window, cx))
+                        .into_any_element()
+                }
+                _ => state_shape(state.as_ref(), theme::STENCIL),
+            }),
         Some(Node::Table { kind, .. }) => row
             .child(icon(match kind {
                 ObjectKind::Table => "table-2",
@@ -471,11 +490,7 @@ fn render_row(entry: &TreeEntry, node: Option<&Node>, selected: bool) -> ListIte
                     .text_color(theme::STENCIL_FAINT)
                     .child(type_name.to_lowercase()),
             ),
-        Some(Node::Note { failed }) => row.child(label.text_color(if *failed {
-            theme::AMBER_TEXT
-        } else {
-            theme::STENCIL_FAINT
-        })),
+        Some(Node::Note) => row.child(label.text_color(theme::STENCIL_FAINT)),
         None => row.child(label),
     };
 
