@@ -6,6 +6,7 @@ use rusqlite::fallible_iterator::FallibleIterator as _;
 use rusqlite::types::ValueRef;
 use rusqlite::{Batch, Connection, InterruptHandle, OpenFlags, Statement};
 
+use super::sql::quote_literal;
 use super::{
     Column, ColumnInfo, ObjectKind, Outcome, ResultSet, StatementResult, TableInfo, TableRef,
     Value, ROW_LIMIT,
@@ -219,6 +220,34 @@ fn text(value: ValueRef<'_>) -> Value {
         ValueRef::Text(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
         ValueRef::Blob(bytes) => Some(format!("<{} bytes>", bytes.len())),
     }
+}
+
+pub fn structure_queries(table: &TableRef) -> Vec<(&'static str, String)> {
+    let name = quote_literal(&Some(table.name.clone()));
+    vec![
+        (
+            "Columns",
+            format!(
+                "SELECT name, type, \"notnull\" AS not_null, dflt_value AS \"default\", pk \
+                 FROM pragma_table_info({name})"
+            ),
+        ),
+        (
+            "Indexes",
+            format!("SELECT name, \"unique\", origin, partial FROM pragma_index_list({name})"),
+        ),
+        (
+            "Foreign keys",
+            format!(
+                "SELECT \"from\", \"table\", \"to\", on_update, on_delete \
+                 FROM pragma_foreign_key_list({name})"
+            ),
+        ),
+        (
+            "Definition",
+            format!("SELECT sql FROM sqlite_master WHERE name = {name}"),
+        ),
+    ]
 }
 
 fn tables(connection: &Connection) -> rusqlite::Result<Vec<TableInfo>> {

@@ -112,6 +112,13 @@ impl Session {
         }
     }
 
+    /// Read-only queries that describe `table`, by title.
+    pub fn structure_queries(&self, table: &TableRef) -> Vec<(&'static str, String)> {
+        match self {
+            Session::Sqlite(_) => sqlite::structure_queries(table),
+        }
+    }
+
     /// The server version, for the Test connection result.
     pub async fn version(&self) -> Result<String, String> {
         match self {

@@ -6,6 +6,7 @@ pub mod navigator;
 pub mod result_grid;
 pub mod settings;
 pub mod sql_editor;
+pub mod table_view;
 pub mod updater;
 pub mod workspace;
 

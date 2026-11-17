@@ -8,6 +8,7 @@ use gpui_kit::component::{h_flex, v_flex, Disableable as _, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::db::TableRef;
 use crate::ui::i18n::{t, tf};
 use crate::ui::icons::lucide;
 use crate::ui::shell::page_label;
@@ -16,9 +17,11 @@ use crate::ui::store::{store, Route, Store};
 use crate::ui::theme;
 use crate::ui::views::navigator::{state_shape, ConnectionState, Navigator, NavigatorEvent};
 use crate::ui::views::sql_editor::SqlEditor;
+use crate::ui::views::table_view::TableView;
 
 enum TabView {
     Editor(Entity<SqlEditor>),
+    Table(Entity<TableView>),
 }
 
 struct Tab {
@@ -78,7 +81,9 @@ impl Workspace {
                             this.open_editor(connection.clone(), window, cx);
                         }
                     }
-                    NavigatorEvent::OpenTable { .. } => {}
+                    NavigatorEvent::OpenTable { connection, table } => {
+                        this.open_table(connection.clone(), table.clone(), window, cx)
+                    }
                 },
             ),
         ];
@@ -103,8 +108,17 @@ impl Workspace {
 
     /// The editor of the tab shown, if it is one.
     pub fn active_editor(&self) -> Option<Entity<SqlEditor>> {
-        self.active_tab().map(|tab| match &tab.view {
-            TabView::Editor(editor) => editor.clone(),
+        self.active_tab().and_then(|tab| match &tab.view {
+            TabView::Editor(editor) => Some(editor.clone()),
+            TabView::Table(_) => None,
+        })
+    }
+
+    /// The table view of the tab shown, if it is one.
+    pub fn active_table(&self) -> Option<Entity<TableView>> {
+        self.active_tab().and_then(|tab| match &tab.view {
+            TabView::Table(view) => Some(view.clone()),
+            TabView::Editor(_) => None,
         })
     }
 
@@ -119,6 +133,45 @@ impl Workspace {
             title: tf("Query {number}", &[("number", &self.queries.to_string())]),
             _observer: cx.observe(&editor, |_, _, cx| cx.notify()),
             view: TabView::Editor(editor),
+        });
+        self.active = Some(id);
+        cx.notify();
+    }
+
+    /// Shows the tab for `table`, opening one if there is none.
+    pub fn open_table(
+        &mut self,
+        connection: String,
+        table: TableRef,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let open = self.tabs.iter().find(|tab| match &tab.view {
+            TabView::Table(view) => tab.connection == connection && view.read(cx).table() == &table,
+            TabView::Editor(_) => false,
+        });
+        if let Some(tab) = open {
+            self.active = Some(tab.id);
+            cx.notify();
+            return;
+        }
+        let info = match self.navigator.read(cx).state(&connection) {
+            Some(ConnectionState::Live(tables)) => tables.iter().find(|info| info.table == table),
+            _ => None,
+        };
+        let Some(info) = info.cloned() else {
+            return;
+        };
+        let title = SharedString::from(table.name.clone());
+        let view = cx.new(|cx| TableView::new(connection.clone(), info, window, cx));
+        let id = self.next_tab;
+        self.next_tab += 1;
+        self.tabs.push(Tab {
+            id,
+            connection,
+            title,
+            _observer: cx.observe(&view, |_, _, cx| cx.notify()),
+            view: TabView::Table(view),
         });
         self.active = Some(id);
         cx.notify();
@@ -180,8 +233,12 @@ impl Workspace {
         } else {
             theme::STENCIL
         };
-        let running = match &tab.view {
-            TabView::Editor(editor) => editor.read(cx).is_running(),
+        let (running, pending) = match &tab.view {
+            TabView::Editor(editor) => (editor.read(cx).is_running(), false),
+            TabView::Table(view) => {
+                let view = view.read(cx);
+                (view.is_busy(), view.pending(cx) > 0)
+            }
         };
         let state = if running {
             Some(ConnectionState::Connecting)
@@ -226,6 +283,10 @@ impl Workspace {
                     .text_size(px(11.))
                     .child(identity.code),
             )
+            // Unsaved edits wait behind an ochre square.
+            .when(pending, |tab| {
+                tab.child(div().size_1p5().flex_shrink_0().bg(theme::AMBER_TEXT))
+            })
             .child(
                 div()
                     .flex_1()
@@ -306,6 +367,7 @@ impl Workspace {
             };
             let summary = match &tab.view {
                 TabView::Editor(editor) => editor.read(cx).summary(),
+                TabView::Table(view) => view.read(cx).summary(cx),
             };
             h_flex()
                 .min_w_0()
@@ -376,6 +438,7 @@ impl Render for Workspace {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = match self.active_tab().map(|tab| &tab.view) {
             Some(TabView::Editor(editor)) => editor.clone().into_any_element(),
+            Some(TabView::Table(view)) => view.clone().into_any_element(),
             None => self.render_empty(cx).into_any_element(),
         };
         v_flex()

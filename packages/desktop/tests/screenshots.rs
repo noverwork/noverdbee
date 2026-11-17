@@ -230,6 +230,66 @@ mod shots {
             stage.shoot(name);
         }
 
+        // A table tab: its rows, then staged edits, then its structure.
+        let workspace = |window: &gpui_kit::Window, cx: &gpui_kit::App| {
+            gpui_kit::base::Root::read(window, cx)
+                .view()
+                .clone()
+                .downcast::<ui::shell::Shell>()
+                .expect("the window shows the shell")
+                .read(cx)
+                .workspace()
+                .expect("the workspace is open")
+                .clone()
+        };
+        let table = desktop_lib::db::TableRef {
+            schema: None,
+            name: "customers".to_string(),
+        };
+        let connection = shop.clone();
+        stage
+            .cx
+            .update_window(stage.window, |_, window, cx| {
+                workspace(window, cx).update(cx, |workspace, cx| {
+                    workspace.open_table(connection, table, window, cx)
+                });
+            })
+            .ok();
+        stage.settle(Duration::from_millis(500));
+        stage.shoot("table-data");
+
+        stage
+            .cx
+            .update_window(stage.window, |_, window, cx| {
+                let view = workspace(window, cx)
+                    .read(cx)
+                    .active_table()
+                    .expect("a table tab");
+                view.update(cx, |view, cx| {
+                    view.stage(0, 1, Some("Ann Lee-Park".to_string()), cx);
+                    view.stage(1, 2, Some("bo@example.com".to_string()), cx);
+                    view.toggle_delete(2, cx);
+                    view.add_row(cx);
+                    view.stage(3, 1, Some("Dee Wu".to_string()), cx);
+                });
+            })
+            .ok();
+        stage.settle(Duration::from_millis(300));
+        stage.shoot("table-pending");
+
+        stage
+            .cx
+            .update_window(stage.window, |_, window, cx| {
+                let view = workspace(window, cx)
+                    .read(cx)
+                    .active_table()
+                    .expect("a table tab");
+                view.update(cx, |view, cx| view.show_structure(window, cx));
+            })
+            .ok();
+        stage.settle(Duration::from_millis(500));
+        stage.shoot("table-structure");
+
         for (name, route) in [
             ("connection-new", Route::ConnectionForm(None)),
             ("connection-edit", Route::ConnectionForm(Some(shop))),
