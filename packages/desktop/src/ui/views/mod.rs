@@ -4,6 +4,7 @@ pub mod common;
 pub mod db_connection_form;
 pub mod navigator;
 pub mod result_grid;
+pub mod selection;
 pub mod settings;
 pub mod sql_editor;
 pub mod table_view;

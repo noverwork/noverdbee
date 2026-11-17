@@ -25,6 +25,7 @@ use crate::ui::store::{store, Store};
 use crate::ui::theme;
 use crate::ui::views::common;
 use crate::ui::views::result_grid::{self, GridState};
+use crate::ui::views::selection::{self, CopyCells, PasteCells, Selectable, Selection};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RowState {
@@ -129,6 +130,7 @@ pub struct EditGrid {
     more: bool,
     order: Option<(usize, Direction)>,
     editing: Option<Editing>,
+    selection: Selection,
     view: WeakEntity<TableView>,
 }
 
@@ -165,11 +167,53 @@ impl EditGrid {
         }
     }
 
+    /// Stages `rows` for deletion, dropping new ones, or restores them.
+    fn set_deleted(&mut self, rows: &[usize], delete: bool) {
+        // From the bottom, so dropping a new row leaves the others in place.
+        for &row in rows.iter().rev() {
+            match self.rows.get(row).map(|row| row.state) {
+                Some(RowState::New) if delete => {
+                    self.rows.remove(row);
+                }
+                Some(RowState::Saved) if delete => self.rows[row].state = RowState::Deleted,
+                Some(RowState::Deleted) if !delete => self.rows[row].state = RowState::Saved,
+                _ => {}
+            }
+        }
+    }
+
+    /// Stages pasted `lines` over the picked cells; rows staged for deletion keep theirs.
+    fn paste(&mut self, lines: &[Vec<Value>]) {
+        let Some(picked) = self.selection.picked() else {
+            return;
+        };
+        let targets = selection::spread(&picked, lines, self.rows.len(), self.columns.len());
+        for (row, col, value) in targets {
+            if self.rows[row].state != RowState::Deleted {
+                self.stage(row, col - 1, value);
+            }
+        }
+    }
+
     fn row_text(&self, row: usize) -> String {
         (0..self.columns.len())
             .map(|column| self.rows[row].value(column).as_deref().unwrap_or("NULL"))
             .collect::<Vec<_>>()
             .join("\t")
+    }
+}
+
+impl Selectable for EditGrid {
+    fn selection(&self) -> &Selection {
+        &self.selection
+    }
+
+    fn selection_mut(&mut self) -> &mut Selection {
+        &mut self.selection
+    }
+
+    fn value(&self, row: usize, col: usize) -> Value {
+        self.rows[row].value(col - 1).clone()
     }
 }
 
@@ -188,6 +232,7 @@ impl TableDelegate for EditGrid {
                 .width(px(56.))
                 .fixed_left()
                 .text_right()
+                .p_0()
                 .resizable(false)
                 .movable(false)
                 .selectable(false);
@@ -208,6 +253,7 @@ impl TableDelegate for EditGrid {
             .unwrap_or(0);
         let grid_column = Column::new(format!("column-{col_ix}"), column.name.clone())
             .width(px((longest as f32 * 7.5 + 24.).clamp(64., 320.)))
+            .p_0()
             .movable(false)
             .sortable();
         let grid_column = match self.order {
@@ -275,47 +321,79 @@ impl TableDelegate for EditGrid {
                 cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
             }
         };
-        let column = cx
-            .entity()
-            .read(cx)
-            .selected_cell()
-            .filter(|(row, column)| *row == row_ix && *column > 0)
-            .map(|(_, column)| column - 1);
-        let state = self.rows[row_ix].state;
+        let picked = self
+            .selection
+            .picked()
+            .filter(|picked| picked.has_row(row_ix));
+        let copied = picked.as_ref().and_then(|_| selection::copied(self, cx));
         let menu = menu
-            .when_some(column, |menu, column| {
-                let text = self.rows[row_ix].value(column).clone().unwrap_or_default();
-                menu.item(PopupMenuItem::new(t("Copy cell")).on_click(copy(text)))
+            .when_some(copied, |menu, text| {
+                menu.item(PopupMenuItem::new(t("Copy")).on_click(copy(text)))
             })
             .item(PopupMenuItem::new(t("Copy row")).on_click(copy(self.row_text(row_ix))));
         if !self.editable() {
             return menu;
         }
-        let change = |grid: WeakEntity<TableState<Self>>, apply: fn(&mut Self, usize, usize)| {
+        let rows = picked
+            .as_ref()
+            .map_or_else(|| vec![row_ix], |picked| picked.rows(self.rows.len()));
+        let cells: Vec<(usize, usize)> = picked
+            .map(|picked| {
+                let cols = picked.cols(self.columns.len());
+                rows.iter()
+                    .flat_map(|&row| cols.clone().map(move |col| (row, col - 1)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let delete = self.rows[row_ix].state != RowState::Deleted;
+        let change = |grid: WeakEntity<TableState<Self>>, apply: Box<dyn Fn(&mut Self)>| {
             move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
                 let _ = grid.update(cx, |grid, cx| {
-                    apply(grid.delegate_mut(), row_ix, column.unwrap_or(0));
+                    apply(grid.delegate_mut());
                     cx.notify();
                 });
             }
         };
+        let label = match (delete, rows.len() > 1) {
+            (true, false) => t("Delete row"),
+            (true, true) => t("Delete rows"),
+            (false, false) => t("Restore row"),
+            (false, true) => t("Restore rows"),
+        };
         menu.separator()
-            .when(column.is_some() && state != RowState::Deleted, |menu| {
-                menu.item(
-                    PopupMenuItem::new(t("Set NULL"))
-                        .on_click(change(grid.clone(), |this, row, column| {
-                            this.stage(row, column, None)
-                        })),
-                )
+            .when(!cells.is_empty() && delete, |menu| {
+                menu.item(PopupMenuItem::new(t("Set NULL")).on_click(change(
+                    grid.clone(),
+                    Box::new(move |this| {
+                        for &(row, column) in &cells {
+                            if this
+                                .rows
+                                .get(row)
+                                .is_some_and(|row| row.state != RowState::Deleted)
+                            {
+                                this.stage(row, column, None);
+                            }
+                        }
+                    }),
+                )))
             })
-            .item(
-                PopupMenuItem::new(if state == RowState::Deleted {
-                    t("Restore row")
-                } else {
-                    t("Delete row")
-                })
-                .on_click(change(grid, |this, row, _| this.toggle_delete(row))),
-            )
+            .item(PopupMenuItem::new(label).on_click(change(
+                grid,
+                Box::new(move |this| this.set_deleted(&rows, delete)),
+            )))
+    }
+
+    /// The cells draw their own padding, so the header does too.
+    fn render_th(
+        &mut self,
+        col_ix: usize,
+        _: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        div()
+            .w_full()
+            .px_2()
+            .child(self.column(col_ix, cx).name.clone())
     }
 
     fn render_td(
@@ -323,42 +401,41 @@ impl TableDelegate for EditGrid {
         row_ix: usize,
         col_ix: usize,
         _: &mut Window,
-        _: &mut Context<TableState<Self>>,
+        cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
+        let picked = self.selection.contains(row_ix, col_ix);
         let row = &self.rows[row_ix];
         if col_ix == 0 {
-            return div()
+            let number = div()
                 .text_color(match row.state {
                     RowState::Saved => theme::STENCIL_FAINT,
                     RowState::New => theme::AMBER_TEXT,
                     RowState::Deleted => theme::RED_TEXT,
                 })
-                .child((row_ix + 1).to_string())
-                .into_any_element();
+                .child((row_ix + 1).to_string());
+            return selection::cell_area(number, row_ix, col_ix, picked, cx).into_any_element();
         }
         let column = col_ix - 1;
         if let Some(editing) = &self.editing {
             if editing.row == row_ix && editing.column == column {
-                return Input::new(&editing.input)
-                    .xsmall()
-                    .appearance(false)
+                return div()
+                    .size_full()
+                    .px_1()
+                    .child(Input::new(&editing.input).xsmall().appearance(false))
                     .into_any_element();
             }
         }
         let cell = result_grid::cell(row.value(column)).w_full();
-        match row.state {
-            RowState::Deleted => cell
-                .text_color(theme::STENCIL_FAINT)
-                .line_through()
-                .into_any_element(),
+        let cell = match row.state {
+            RowState::Deleted => cell.text_color(theme::STENCIL_FAINT).line_through(),
             _ if row.edits.contains_key(&column) => cell
                 .px_1()
                 .border_1()
                 .border_color(theme::AMBER)
-                .text_color(theme::AMBER_TEXT)
-                .into_any_element(),
-            _ => cell.into_any_element(),
-        }
+                .text_color(theme::AMBER_TEXT),
+            _ => cell,
+        };
+        selection::cell_area(cell, row_ix, col_ix, picked, cx).into_any_element()
     }
 
     fn cell_text(&self, row_ix: usize, col_ix: usize, _: &App) -> String {
@@ -592,11 +669,13 @@ impl TableView {
             more,
             order: self.order,
             editing: None,
+            selection: Selection::default(),
             view: cx.weak_entity(),
         };
         let grid = cx.new(|cx| {
             TableState::new(delegate, window, cx)
                 .cell_selectable(true)
+                .row_selectable(false)
                 .row_header(false)
                 .col_movable(false)
         });
@@ -614,6 +693,7 @@ impl TableView {
                 }
             },
         ));
+        selection::track(&grid, cx);
         self.grid = Some(grid);
     }
 
@@ -655,6 +735,24 @@ impl TableView {
                 let text = editing.input.read(cx).value().to_string();
                 grid.delegate_mut()
                     .stage(editing.row, editing.column, Some(text));
+                cx.notify();
+            }
+        });
+    }
+
+    /// Stages the clipboard over the picked cells.
+    fn paste(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return;
+        };
+        let Some(grid) = self.grid.clone() else {
+            return;
+        };
+        self.commit(cx);
+        let lines = selection::parse(&text);
+        grid.update(cx, |grid, cx| {
+            if grid.delegate().editable() {
+                grid.delegate_mut().paste(&lines);
                 cx.notify();
             }
         });
@@ -950,6 +1048,15 @@ impl TableView {
             Some(grid) => div()
                 .size_full()
                 .text_xs()
+                .on_action({
+                    let grid = grid.clone();
+                    move |_: &CopyCells, _, cx| {
+                        if let Some(text) = selection::copied(grid.read(cx).delegate(), cx) {
+                            cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        }
+                    }
+                })
+                .on_action(cx.listener(|this, _: &PasteCells, _, cx| this.paste(cx)))
                 .child(
                     DataTable::new(grid)
                         .with_size(Size::Size(px(24.)))

@@ -12,6 +12,7 @@ use gpui_kit::*;
 use crate::db::{self, ResultSet, Value};
 use crate::ui::i18n::t;
 use crate::ui::theme;
+use crate::ui::views::selection::{self, CopyCells, Selectable, Selection};
 
 pub type GridState = TableState<Grid>;
 
@@ -24,6 +25,7 @@ pub struct Grid {
     result: ResultSet,
     /// Row indexes in display order; sorting reorders this, not the rows.
     order: Vec<usize>,
+    selection: Selection,
 }
 
 impl Grid {
@@ -31,6 +33,7 @@ impl Grid {
         Self {
             order: (0..result.rows.len()).collect(),
             result,
+            selection: Selection::default(),
         }
     }
 
@@ -93,6 +96,20 @@ pub fn cell(value: &Value) -> Div {
     }
 }
 
+impl Selectable for Grid {
+    fn selection(&self) -> &Selection {
+        &self.selection
+    }
+
+    fn selection_mut(&mut self) -> &mut Selection {
+        &mut self.selection
+    }
+
+    fn value(&self, row: usize, col: usize) -> Value {
+        self.value(row, col).clone()
+    }
+}
+
 impl TableDelegate for Grid {
     fn columns_count(&self, _: &App) -> usize {
         self.result.columns.len() + 1
@@ -108,6 +125,7 @@ impl TableDelegate for Grid {
                 .width(NUMBER_WIDTH)
                 .fixed_left()
                 .text_right()
+                .p_0()
                 .resizable(false)
                 .movable(false)
                 .selectable(false);
@@ -115,6 +133,7 @@ impl TableDelegate for Grid {
         let column = &self.result.columns[col_ix - 1];
         let grid_column = Column::new(format!("column-{col_ix}"), column.name.clone())
             .width(column_width(&self.result, col_ix - 1))
+            .p_0()
             .movable(false)
             .sortable();
         if column.numeric {
@@ -160,16 +179,28 @@ impl TableDelegate for Grid {
                 cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
             }
         };
-        let cell = cx
-            .entity()
-            .read(cx)
-            .selected_cell()
-            .filter(|(row, column)| *row == row_ix && *column > 0)
-            .map(|(row, column)| self.cell_text(row, column, cx));
-        menu.when_some(cell, |menu, text| {
-            menu.item(PopupMenuItem::new(t("Copy cell")).on_click(copy(text)))
+        let picked = self
+            .selection
+            .picked()
+            .filter(|picked| picked.has_row(row_ix));
+        let copied = picked.and_then(|_| selection::copied(self, cx));
+        menu.when_some(copied, |menu, text| {
+            menu.item(PopupMenuItem::new(t("Copy")).on_click(copy(text)))
         })
         .item(PopupMenuItem::new(t("Copy row")).on_click(copy(self.row_text(row_ix))))
+    }
+
+    /// The cells draw their own padding, so the header does too.
+    fn render_th(
+        &mut self,
+        col_ix: usize,
+        _: &mut Window,
+        cx: &mut Context<GridState>,
+    ) -> impl IntoElement {
+        div()
+            .w_full()
+            .px_2()
+            .child(self.column(col_ix, cx).name.clone())
     }
 
     fn render_td(
@@ -177,14 +208,17 @@ impl TableDelegate for Grid {
         row_ix: usize,
         col_ix: usize,
         _: &mut Window,
-        _: &mut Context<GridState>,
+        cx: &mut Context<GridState>,
     ) -> impl IntoElement {
-        if col_ix == 0 {
-            return div()
+        let picked = self.selection.contains(row_ix, col_ix);
+        let content = if col_ix == 0 {
+            div()
                 .text_color(theme::STENCIL_FAINT)
-                .child((row_ix + 1).to_string());
-        }
-        cell(self.value(row_ix, col_ix))
+                .child((row_ix + 1).to_string())
+        } else {
+            cell(self.value(row_ix, col_ix))
+        };
+        selection::cell_area(content, row_ix, col_ix, picked, cx)
     }
 
     fn cell_text(&self, row_ix: usize, col_ix: usize, _: &App) -> String {
@@ -196,22 +230,34 @@ impl TableDelegate for Grid {
 }
 
 pub fn new_grid(result: ResultSet, window: &mut Window, cx: &mut App) -> Entity<GridState> {
-    cx.new(|cx| {
+    let grid = cx.new(|cx| {
         TableState::new(Grid::new(result), window, cx)
             .cell_selectable(true)
+            .row_selectable(false)
             .row_header(false)
             .col_movable(false)
-    })
+    });
+    selection::track(&grid, cx);
+    grid
 }
 
 /// The grid element for `state`.
 pub fn grid(state: &Entity<GridState>) -> impl IntoElement {
-    div().size_full().text_xs().child(
-        DataTable::new(state)
-            .with_size(Size::Size(px(24.)))
-            .bordered(false)
-            .header_row_height(px(24.)),
-    )
+    let copy = state.clone();
+    div()
+        .size_full()
+        .text_xs()
+        .on_action(move |_: &CopyCells, _, cx| {
+            if let Some(text) = selection::copied(copy.read(cx).delegate(), cx) {
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+            }
+        })
+        .child(
+            DataTable::new(state)
+                .with_size(Size::Size(px(24.)))
+                .bordered(false)
+                .header_row_height(px(24.)),
+        )
 }
 
 /// `120 rows`, or `10000+ rows` for a result that was cut short.
