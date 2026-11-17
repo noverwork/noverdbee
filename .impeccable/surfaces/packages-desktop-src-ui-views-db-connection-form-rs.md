@@ -72,6 +72,16 @@ Tab order follows the visual order. Enter in a field does nothing; Cmd/Ctrl+Ente
 
 Reuse from `packages/desktop/src/ui/views/common.rs`: `form_page`, `form_section`, `field`, `form_buttons`, `error_banner`, `Choice` with `new_select` and `selected`. GPUI Kit: `input`, `select`, `switch`, `button`, `spinner`. Group preview uses `stencil::line_color` and `stencil::group_prefix`.
 
+## As built
+
+Where the first version differs from the text above:
+
+- The driver can be changed while editing a saved connection.
+- The group is a text field, with no live preview of the swatch and code.
+- Fields are checked when Test connection or Save is pressed, not on blur. Cmd/Ctrl+Enter and Esc are not bound.
+- SSL modes are `disable`, `prefer` and `require`; certificates are checked against the system roots only.
+- The password is saved in plain text in the app's SQLite store and is shown again when editing.
+
 ## Open decisions
 
 - Where the password is stored (the app's SQLite store in plain text, or the OS keychain). The form is the same either way.

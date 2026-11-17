@@ -111,6 +111,19 @@ Left to right: swatch + active code; address (`user@host:port/database`, or the 
 
 GPUI Kit modules: `tree` (navigator), `tab` (workspace strip), `resizable` (navigator and editor splits), `status_bar`, `menu`, `input` (filter), `spinner`, `tooltip`. Reuse `stencil::line_color` and `stencil::group_prefix` for swatches and codes, `icons::lucide`, `theme` constants, and `i18n::t` for all copy.
 
+## As built
+
+Where the first version differs from the text above:
+
+- The workspace (`views/workspace.rs`) draws the top bar, the navigator split and the status line; the shell shows it on the Databases route and keeps it alive across routes. The status line is therefore absent on Settings and on forms.
+- The navigator (`views/navigator.rs`) has no HISTORY view; history is not built.
+- Every table and column of a connection loads when it connects; nothing loads on expand.
+- A click opens a closed connection, and a connection that opens with no tab gets a SQL editor. Double-click a table for its tab.
+- Groups are typed as text on the connection form; a group exists while a connection is in it. There is no group menu.
+- Tabs do not reorder by drag, and the tab strip is plain rib without the corrugation pattern.
+- Only Cmd/Ctrl+, and the editor's Cmd/Ctrl+Enter are bound. The other shortcuts in the table are not built.
+- The narrow-window overlay and the recent-connections list are not built.
+
 ## Recorded adaptations
 - Line colours are darkened to rust #a33b28, harbour blue #2a648f, evergreen #336a41 so stencil text keeps >= 4.5:1; ochre #c9952e takes dark text when filled. No fifth colour.
 - Inactive tabs mix their line colour 55% into the rib (instead of 55% opacity) so the stencil text keeps contrast; they carry a 1px white/10 edge so ungrouped tabs still read as containers.

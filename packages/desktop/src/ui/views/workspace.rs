@@ -33,6 +33,18 @@ struct Tab {
     _observer: Subscription,
 }
 
+/// Where a connection points: the file, or `user@host:port/database`.
+fn address(record: &shared::DbConnectionRecord) -> String {
+    if record.driver == crate::db::DRIVER_POSTGRES {
+        format!(
+            "{}@{}:{}/{}",
+            record.username, record.host, record.port, record.database
+        )
+    } else {
+        record.path.clone()
+    }
+}
+
 /// How a connection is marked: its `GRP·NAME` code and its group's line colour.
 struct Identity {
     code: SharedString,
@@ -162,7 +174,7 @@ impl Workspace {
         let Some(info) = info.cloned() else {
             return;
         };
-        let title = SharedString::from(table.name.clone());
+        let title = SharedString::from(table.label());
         let view = cx.new(|cx| TableView::new(connection.clone(), info, window, cx));
         let id = self.next_tab;
         self.next_tab += 1;
@@ -357,7 +369,7 @@ impl Workspace {
                 .store
                 .read(cx)
                 .connection(&tab.connection)
-                .map(|record| SharedString::from(record.path.clone()))
+                .map(|record| SharedString::from(address(record)))
                 .unwrap_or_default();
             let (state, held) = match navigator.state(&tab.connection) {
                 Some(ConnectionState::Live(_)) => (t("Connected"), false),

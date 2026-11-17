@@ -115,6 +115,20 @@ mod shots {
                     shop = saved.id;
                 }
             }
+            let warehouse = DbConnectionRecord {
+                name: "warehouse".to_string(),
+                driver: desktop_lib::db::DRIVER_POSTGRES.to_string(),
+                host: "db.internal".to_string(),
+                port: 5432,
+                database: "warehouse".to_string(),
+                username: "analyst".to_string(),
+                password: "secret".to_string(),
+                ssl_mode: "require".to_string(),
+                ..Default::default()
+            };
+            connection_save(warehouse, "Staging".to_string(), app.state())
+                .await
+                .expect("save connection");
             shop
         })
     }
@@ -290,8 +304,13 @@ mod shots {
         stage.settle(Duration::from_millis(500));
         stage.shoot("table-structure");
 
+        let warehouse = stage.store(|store, _| {
+            let saved = store.connections.iter().find(|row| row.name == "warehouse");
+            saved.map(|row| row.id.clone())
+        });
         for (name, route) in [
             ("connection-new", Route::ConnectionForm(None)),
+            ("connection-postgres", Route::ConnectionForm(warehouse)),
             ("connection-edit", Route::ConnectionForm(Some(shop))),
         ] {
             stage.store(|store, cx| store.navigate(route, cx));

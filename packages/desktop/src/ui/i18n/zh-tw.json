@@ -99,5 +99,16 @@
  "Columns": "欄位",
  "Indexes": "索引",
  "Foreign keys": "外鍵",
- "Definition": "定義"
+ "Definition": "定義",
+ "Host is required": "請輸入主機",
+ "Port must be a number from 1 to 65535": "連接埠須為 1 到 65535 的數字",
+ "User is required": "請輸入使用者",
+ "Server": "伺服器",
+ "Host": "主機",
+ "Port": "連接埠",
+ "Database": "資料庫",
+ "User": "使用者",
+ "Password": "密碼",
+ "SSL mode": "SSL 模式",
+ "Database type": "資料庫類型"
 }

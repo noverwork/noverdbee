@@ -13,6 +13,14 @@ pub struct TableRef {
 }
 
 impl TableRef {
+    /// The name to show: `schema.name`, or the bare name in the default schema.
+    pub fn label(&self) -> String {
+        match self.schema.as_deref() {
+            None | Some("public") => self.name.clone(),
+            Some(schema) => format!("{schema}.{}", self.name),
+        }
+    }
+
     pub fn quoted(&self) -> String {
         match &self.schema {
             Some(schema) => format!("{}.{}", quote_ident(schema), quote_ident(&self.name)),

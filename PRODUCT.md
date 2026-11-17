@@ -29,8 +29,8 @@ Native and lightweight: built on GPUI and Rust, with no Electron, no webview, an
 
 ## Capabilities and Constraints
 
-- Built so far: the app shell, connection groups, settings with backup and restore, auto-update from GitHub Releases.
-- Planned for the first version: PostgreSQL and SQLite connections, object navigator, tabbed SQL editor, result grid, table data viewer and editor, table structure viewer, query history.
+- Built so far: PostgreSQL and SQLite connections in groups, object navigator, tabbed SQL editor, result grid, table data viewer and editor, table structure viewer, settings with backup and restore, auto-update from GitHub Releases.
+- Next: query history, CSV export, manual transactions.
 - Later, not in the first version: MySQL and SQL Server, SSH tunnels, saved queries, structure editing, import, ER diagrams, command palette.
 - Stack: GPUI with GPUI Kit components in the UI; Rust, Tokio, Diesel/SQLite behind it.
 - UI copy ships in English and Traditional Chinese (zh-TW).

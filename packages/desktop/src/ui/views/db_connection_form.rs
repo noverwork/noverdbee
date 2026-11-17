@@ -4,28 +4,47 @@ use std::time::Instant;
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::select::{Select, SelectEvent};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{h_flex, v_flex, Disableable as _};
 use gpui_kit::*;
 use shared::DbConnectionRecord;
 
-use crate::db::{Session, SessionManager, DRIVER_SQLITE};
+use crate::db::{Session, SessionManager, DRIVER_POSTGRES, DRIVER_SQLITE};
 use crate::ui::bridge::backend;
 use crate::ui::i18n::{t, tf};
 use crate::ui::store::{store, Route, Store};
 use crate::ui::theme;
-use crate::ui::views::common;
+use crate::ui::views::common::{self, Choice, ChoiceSelect};
+
+const DEFAULT_PORT: i32 = 5432;
 
 #[derive(Debug, Default, PartialEq)]
 struct Errors {
     name: Option<&'static str>,
     path: Option<&'static str>,
+    host: Option<&'static str>,
+    port: Option<&'static str>,
+    username: Option<&'static str>,
 }
 
-fn validate(name: &str, path: &str) -> Errors {
+/// Checks what the record's driver needs. `port` is the text as typed.
+fn validate(record: &DbConnectionRecord, port: &str) -> Errors {
+    let missing = |value: &str, message: &'static str| value.trim().is_empty().then_some(message);
+    let postgres = record.driver == DRIVER_POSTGRES;
     Errors {
-        name: name.trim().is_empty().then_some("Name is required"),
-        path: path.trim().is_empty().then_some("Choose a database file"),
+        name: missing(&record.name, "Name is required"),
+        path: (!postgres)
+            .then(|| missing(&record.path, "Choose a database file"))
+            .flatten(),
+        host: postgres
+            .then(|| missing(&record.host, "Host is required"))
+            .flatten(),
+        port: (postgres && !matches!(port.trim().parse::<u16>(), Ok(1..)))
+            .then_some("Port must be a number from 1 to 65535"),
+        username: postgres
+            .then(|| missing(&record.username, "User is required"))
+            .flatten(),
     }
 }
 
@@ -40,14 +59,22 @@ pub struct DbConnectionForm {
     store: Entity<Store>,
     /// The connection being edited; `None` adds a new one.
     id: Option<String>,
+    driver: Entity<ChoiceSelect>,
     name: Entity<InputState>,
     group: Entity<InputState>,
     path: Entity<InputState>,
     read_only: bool,
+    host: Entity<InputState>,
+    port: Entity<InputState>,
+    database: Entity<InputState>,
+    username: Entity<InputState>,
+    password: Entity<InputState>,
+    ssl_mode: Entity<ChoiceSelect>,
     errors: Errors,
     error: Option<SharedString>,
     saving: bool,
     test: Test,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl DbConnectionForm {
@@ -62,44 +89,119 @@ impl DbConnectionForm {
                 .and_then(|group_id| store.groups.iter().find(|group| group.id == group_id))
                 .map(|group| group.name.clone())
                 .unwrap_or_default();
-            (existing.unwrap_or_default(), group_name)
+            let new = DbConnectionRecord {
+                driver: DRIVER_SQLITE.to_string(),
+                port: DEFAULT_PORT,
+                ssl_mode: "prefer".to_string(),
+                ..DbConnectionRecord::default()
+            };
+            (existing.unwrap_or(new), group_name)
         };
-        let mut input = |value: String, placeholder: SharedString| {
+        let driver = common::new_select(
+            vec![
+                Choice::new(DRIVER_SQLITE, "SQLite"),
+                Choice::new(DRIVER_POSTGRES, "PostgreSQL"),
+            ],
+            &existing.driver,
+            window,
+            cx,
+        );
+        let ssl_mode = common::new_select(
+            ["disable", "prefer", "require"]
+                .map(|mode| Choice::new(mode, mode))
+                .to_vec(),
+            if existing.ssl_mode.is_empty() {
+                "prefer"
+            } else {
+                &existing.ssl_mode
+            },
+            window,
+            cx,
+        );
+        // Switching driver swaps the sections and clears their messages.
+        let _subscriptions =
+            vec![
+                cx.subscribe(&driver, |this, _, _: &SelectEvent<Vec<Choice>>, cx| {
+                    this.errors = Errors::default();
+                    this.test = Test::Idle;
+                    cx.notify();
+                }),
+            ];
+        let mut input = |value: String, placeholder: &'static str| {
             cx.new(|cx| {
                 InputState::new(window, cx)
                     .default_value(value)
                     .placeholder(placeholder)
             })
         };
+        let port = if existing.port > 0 {
+            existing.port
+        } else {
+            DEFAULT_PORT
+        };
         Self {
-            name: input(existing.name, t("orders")),
-            group: input(group_name, t("production")),
-            path: input(existing.path, t("/path/to/database.db")),
+            name: input(existing.name, "orders"),
+            group: input(group_name, "production"),
+            path: input(existing.path, "/path/to/database.db"),
+            host: input(existing.host, "localhost"),
+            port: input(port.to_string(), "5432"),
+            database: input(existing.database, "postgres"),
+            username: input(existing.username, "postgres"),
+            password: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .masked(true)
+                    .default_value(existing.password)
+            }),
             read_only: existing.read_only,
+            driver,
+            ssl_mode,
             store,
             id,
             errors: Errors::default(),
             error: None,
             saving: false,
             test: Test::Idle,
+            _subscriptions,
         }
     }
 
+    fn is_postgres(&self, cx: &App) -> bool {
+        common::selected(&self.driver, cx).as_deref() == Some(DRIVER_POSTGRES)
+    }
+
+    /// The record the fields describe; fields of the other driver stay empty.
     fn record(&self, cx: &App) -> DbConnectionRecord {
-        DbConnectionRecord {
+        let text = |input: &Entity<InputState>| input.read(cx).value().trim().to_string();
+        let shared = DbConnectionRecord {
             id: self.id.clone().unwrap_or_default(),
-            name: self.name.read(cx).value().trim().to_string(),
-            driver: DRIVER_SQLITE.to_string(),
-            path: self.path.read(cx).value().trim().to_string(),
-            read_only: self.read_only,
+            name: text(&self.name),
             ..DbConnectionRecord::default()
+        };
+        if self.is_postgres(cx) {
+            DbConnectionRecord {
+                driver: DRIVER_POSTGRES.to_string(),
+                host: text(&self.host),
+                port: text(&self.port).parse().unwrap_or(0),
+                database: text(&self.database),
+                username: text(&self.username),
+                // A password may begin or end with a space.
+                password: self.password.read(cx).value().to_string(),
+                ssl_mode: common::selected(&self.ssl_mode, cx).unwrap_or_default(),
+                ..shared
+            }
+        } else {
+            DbConnectionRecord {
+                driver: DRIVER_SQLITE.to_string(),
+                path: text(&self.path),
+                read_only: self.read_only,
+                ..shared
+            }
         }
     }
 
     /// Checks the fields; `false` when the form cannot be used yet.
     fn check(&mut self, cx: &mut Context<Self>) -> bool {
-        let record = self.record(cx);
-        self.errors = validate(&record.name, &record.path);
+        self.errors = validate(&self.record(cx), &self.port.read(cx).value());
         cx.notify();
         self.errors == Errors::default()
     }
@@ -218,23 +320,9 @@ impl DbConnectionForm {
                 .child(text)
         })
     }
-}
 
-impl Render for DbConnectionForm {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let title = if self.id.is_some() {
-            t("Edit connection")
-        } else {
-            t("New connection")
-        };
-        let connection = common::form_section("database", t("Connection"), None)
-            .child(common::field(
-                t("Name"),
-                Input::new(&self.name),
-                self.errors.name.map(t),
-            ))
-            .child(common::field(t("Group"), Input::new(&self.group), None));
-        let file = common::form_section("file", t("SQLite file"), None)
+    fn render_file(&self, cx: &Context<Self>) -> Div {
+        common::form_section("file", t("SQLite file"), None)
             .child(common::field(
                 t("Path"),
                 h_flex()
@@ -256,7 +344,73 @@ impl Render for DbConnectionForm {
                         this.read_only = *checked;
                         cx.notify();
                     })),
-            );
+            )
+    }
+
+    fn render_server(&self) -> Div {
+        common::form_section("server", t("Server"), None)
+            .child(
+                h_flex()
+                    .items_start()
+                    .gap_3()
+                    .child(div().flex_1().min_w_0().child(common::field(
+                        t("Host"),
+                        Input::new(&self.host),
+                        self.errors.host.map(t),
+                    )))
+                    .child(div().w_32().child(common::field(
+                        t("Port"),
+                        Input::new(&self.port),
+                        self.errors.port.map(t),
+                    ))),
+            )
+            .child(common::field(
+                t("Database"),
+                Input::new(&self.database),
+                None,
+            ))
+            .child(common::field(
+                t("User"),
+                Input::new(&self.username),
+                self.errors.username.map(t),
+            ))
+            .child(common::field(
+                t("Password"),
+                Input::new(&self.password).mask_toggle(),
+                None,
+            ))
+            .child(common::field(
+                t("SSL mode"),
+                Select::new(&self.ssl_mode),
+                None,
+            ))
+    }
+}
+
+impl Render for DbConnectionForm {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = if self.id.is_some() {
+            t("Edit connection")
+        } else {
+            t("New connection")
+        };
+        let connection = common::form_section("database", t("Connection"), None)
+            .child(common::field(
+                t("Database type"),
+                Select::new(&self.driver),
+                None,
+            ))
+            .child(common::field(
+                t("Name"),
+                Input::new(&self.name),
+                self.errors.name.map(t),
+            ))
+            .child(common::field(t("Group"), Input::new(&self.group), None));
+        let details = if self.is_postgres(cx) {
+            self.render_server()
+        } else {
+            self.render_file(cx)
+        };
         let testing = matches!(self.test, Test::Running);
 
         common::form_page(
@@ -265,7 +419,7 @@ impl Render for DbConnectionForm {
             v_flex()
                 .gap_4()
                 .child(connection)
-                .child(file)
+                .child(details)
                 .children(self.render_test()),
             h_flex()
                 .w_full()
@@ -292,16 +446,55 @@ impl Render for DbConnectionForm {
 mod tests {
     // Not `super::*`: that would pull in GPUI's own `test` attribute.
     use super::{validate, Errors};
+    use crate::db::{DRIVER_POSTGRES, DRIVER_SQLITE};
+    use shared::DbConnectionRecord;
 
     #[test]
-    fn a_connection_needs_a_name_and_a_file() {
-        assert_eq!(validate("orders", "/tmp/a.db"), Errors::default());
+    fn each_driver_asks_only_for_its_own_fields() {
+        let sqlite = DbConnectionRecord {
+            name: "orders".to_string(),
+            driver: DRIVER_SQLITE.to_string(),
+            path: "/tmp/a.db".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(validate(&sqlite, ""), Errors::default());
+        let blank = DbConnectionRecord {
+            driver: DRIVER_SQLITE.to_string(),
+            ..Default::default()
+        };
         assert_eq!(
-            validate("  ", ""),
+            validate(&blank, "5432"),
             Errors {
                 name: Some("Name is required"),
                 path: Some("Choose a database file"),
+                ..Errors::default()
             }
         );
+
+        let postgres = DbConnectionRecord {
+            name: "orders".to_string(),
+            driver: DRIVER_POSTGRES.to_string(),
+            host: "db.internal".to_string(),
+            username: "app".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(validate(&postgres, "5432"), Errors::default());
+        let incomplete = DbConnectionRecord {
+            host: " ".to_string(),
+            username: String::new(),
+            ..postgres
+        };
+        for port in ["", "0", "70000", "abc"] {
+            assert_eq!(
+                validate(&incomplete, port),
+                Errors {
+                    host: Some("Host is required"),
+                    port: Some("Port must be a number from 1 to 65535"),
+                    username: Some("User is required"),
+                    ..Errors::default()
+                },
+                "port {port:?}"
+            );
+        }
     }
 }

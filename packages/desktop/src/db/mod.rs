@@ -1,11 +1,12 @@
 //! Sessions against the databases the user manages. The app's own data lives
 //! in `crate::store`, not here.
 
+mod postgres;
 pub mod sql;
 mod sqlite;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use shared::DbConnectionRecord;
@@ -84,6 +85,7 @@ pub struct TableInfo {
 #[derive(Debug, Clone)]
 pub enum Session {
     Sqlite(sqlite::SqliteSession),
+    Postgres(Arc<postgres::PostgresSession>),
 }
 
 impl Session {
@@ -92,6 +94,9 @@ impl Session {
             DRIVER_SQLITE => sqlite::SqliteSession::open(record.path.clone(), record.read_only)
                 .await
                 .map(Session::Sqlite),
+            DRIVER_POSTGRES => postgres::PostgresSession::open(record)
+                .await
+                .map(|session| Session::Postgres(Arc::new(session))),
             other => Err(format!("unsupported database driver: {other}")),
         }
     }
@@ -100,6 +105,7 @@ impl Session {
     pub async fn run(&self, sql: String) -> Vec<StatementResult> {
         match self {
             Session::Sqlite(session) => session.run(sql).await,
+            Session::Postgres(session) => session.run(sql).await,
         }
     }
 
@@ -109,6 +115,7 @@ impl Session {
     pub async fn tables(&self) -> Result<Vec<TableInfo>, String> {
         match self {
             Session::Sqlite(session) => session.tables().await,
+            Session::Postgres(session) => session.tables().await,
         }
     }
 
@@ -116,6 +123,7 @@ impl Session {
     pub fn structure_queries(&self, table: &TableRef) -> Vec<(&'static str, String)> {
         match self {
             Session::Sqlite(_) => sqlite::structure_queries(table),
+            Session::Postgres(_) => postgres::structure_queries(table),
         }
     }
 
@@ -123,6 +131,7 @@ impl Session {
     pub async fn version(&self) -> Result<String, String> {
         match self {
             Session::Sqlite(session) => session.version().await,
+            Session::Postgres(session) => session.version().await,
         }
     }
 
@@ -130,6 +139,7 @@ impl Session {
     pub fn cancel(&self) {
         match self {
             Session::Sqlite(session) => session.cancel(),
+            Session::Postgres(session) => session.cancel(),
         }
     }
 }

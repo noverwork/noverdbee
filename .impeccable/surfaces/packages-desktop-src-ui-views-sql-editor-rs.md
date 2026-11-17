@@ -104,6 +104,18 @@ A plain list in body-small, newest last: statement number, the first line of the
 
 GPUI Kit: `input` code editor (`input/editor.rs`) with the `highlighter` module for SQL, `table` for the grid (virtualised), `resizable` for the split, `tab` for result tabs, `select`, `button`, `menu`, `tooltip`, `spinner`. The grid lives in its own file so the table view can reuse it.
 
+## As built
+
+Where the first version differs from the text above:
+
+- Run runs the selection, or the whole editor when nothing is selected. There is no statement-under-cursor and no separate Run all.
+- No database or schema selects, no transaction mode, no completion, and editor text is not kept across restarts.
+- A query is read whole, up to 10,000 rows, then cut short; rows are not fetched on scroll.
+- The grid selects one cell, not a range. Copy cell and Copy row are in the context menu; there is no value panel, no Copy as, and no CSV export.
+- Column headers show the names verbatim rather than in tracked caps, because names are case-sensitive.
+- On PostgreSQL a failed query reports the error alone, numeric columns are detected from their values, and every result of one run carries the time of the whole run.
+- Highlighting uses tree-sitter (`tree-sitter-sql` feature of the kit).
+
 ## Open decisions
 
 - SQL highlighting needs the kit's tree-sitter SQL grammar or its syntect backend; pick one at build time.

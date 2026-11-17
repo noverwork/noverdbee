@@ -90,6 +90,18 @@ Grid movement, selection, copy, and the value panel work as in the SQL editor su
 
 The shared grid from `result_grid.rs` (GPUI Kit `table`), plus `input` for in-cell editing and the WHERE field, `tab` for structure sub-tabs, `dialog` for Review SQL and the unsaved-changes prompt, the kit's code editor in read-only mode for DDL, `button`, `spinner`. Reuse `common::empty_state`, `common::error_banner`, and `common::confirm_delete`'s dialog pattern.
 
+## As built
+
+Where the first version differs from the text above:
+
+- Data and Structure are two modes of one tab, switched in its toolbar, not two tabs.
+- Rows load 200 at a time. The footer shows how many are loaded and whether more exist; there is no row estimate.
+- An edit is staged on Enter or when the cell loses focus. Esc does not revert; Discard drops everything staged.
+- Set NULL, Delete row and Restore row are in the row's context menu. None of the shortcuts in the table are bound.
+- Sorting asks the database again, so it is ignored while edits are staged.
+- Save also rolls back when a statement changed any number of rows other than one.
+- The DDL is plain text, not a highlighted read-only editor. For PostgreSQL it is rebuilt from the catalog and says so.
+
 ## Open decisions
 
 - Editors for specific types (date picker, JSON editor, enum select) are left for later; the first version edits every value as text and lets the database reject bad input.

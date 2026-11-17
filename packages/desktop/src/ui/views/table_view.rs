@@ -100,21 +100,18 @@ fn statements(table: &TableRef, columns: &[String], key: &[usize], rows: &[Row])
 /// Why a save must be rolled back, if it must. Every staged statement has to
 /// change exactly the one row it was written for.
 fn save_failure(results: &[StatementResult], expected: usize) -> Option<String> {
-    for result in results {
+    for (index, result) in results.iter().enumerate() {
         match &result.outcome {
             Outcome::Error { message, .. } => return Some(message.clone()),
-            Outcome::Affected(1) | Outcome::Rows(_) => {}
-            Outcome::Affected(_)
-                if result.sql.starts_with("BEGIN") || result.sql.starts_with("COMMIT") => {}
-            Outcome::Affected(count) => {
+            // The first result is BEGIN and the last is COMMIT.
+            Outcome::Affected(count) if (1..=expected).contains(&index) && *count != 1 => {
                 return Some(format!(
-                    "a statement changed {count} rows instead of 1: {}",
-                    result.sql
+                    "statement {index} changed {count} rows instead of 1"
                 ))
             }
+            _ => {}
         }
     }
-    // BEGIN, the statements, COMMIT.
     (results.len() != expected + 2).then(|| "the save did not finish".to_string())
 }
 

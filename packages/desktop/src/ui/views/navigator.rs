@@ -284,7 +284,7 @@ impl Navigator {
         }
         if let Some(ConnectionState::Live(tables)) = &state {
             for table in tables.iter() {
-                if !filter.is_empty() && !table.table.name.to_lowercase().contains(filter) {
+                if !filter.is_empty() && !table.table.label().to_lowercase().contains(filter) {
                     continue;
                 }
                 children.push(table_item(&connection.id, table, &self.expanded, nodes));
@@ -357,7 +357,7 @@ fn table_item(
         );
         TreeItem::new(column_id, column.name.clone())
     });
-    TreeItem::new(id.clone(), table.table.name.clone())
+    TreeItem::new(id.clone(), table.table.label())
         .children(columns)
         .expanded(expanded.get(&id).copied().unwrap_or(false))
 }
