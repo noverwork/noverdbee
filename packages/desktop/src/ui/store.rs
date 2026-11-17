@@ -10,6 +10,8 @@ use crate::ui::i18n::{self, Locale};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Route {
     Databases,
+    /// Add a connection, or edit the one with this id.
+    ConnectionForm(Option<String>),
     Settings,
 }
 
@@ -96,6 +98,12 @@ impl Store {
             });
         })
         .detach();
+    }
+
+    pub fn connection(&self, id: &str) -> Option<&DbConnectionRecord> {
+        self.connections
+            .iter()
+            .find(|connection| connection.id == id)
     }
 
     pub fn setting(&self, key: &str) -> Option<&str> {

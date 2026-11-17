@@ -1,18 +1,26 @@
 //! One module per page, plus the update check.
 
 pub mod common;
-pub mod databases;
+pub mod db_connection_form;
+pub mod navigator;
 pub mod settings;
 pub mod updater;
+pub mod workspace;
 
 use gpui_kit::*;
 
 use crate::ui::store::Route;
 
-/// Builds the page for `route`.
+/// Builds the page for `route`. The Databases page is not built here: the
+/// shell keeps its workspace alive across routes.
 pub fn build(route: &Route, window: &mut Window, cx: &mut App) -> AnyView {
     match route {
-        Route::Databases => cx.new(|_| databases::DatabasesView).into(),
+        Route::Databases => cx.new(|cx| workspace::Workspace::new(window, cx)).into(),
+        Route::ConnectionForm(id) => {
+            let id = id.clone();
+            cx.new(|cx| db_connection_form::DbConnectionForm::new(id, window, cx))
+                .into()
+        }
         Route::Settings => cx.new(|cx| settings::SettingsView::new(window, cx)).into(),
     }
 }

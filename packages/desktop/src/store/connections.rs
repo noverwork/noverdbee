@@ -1,7 +1,8 @@
 use chrono::Utc;
 use diesel::prelude::*;
-use orm::models::{DbConnection, NewDbConnection, UpdateDbConnection};
-use orm::schema::db_connections;
+use diesel::sqlite::SqliteConnection;
+use orm::models::{DbConnection, NewConnectionGroup, NewDbConnection, UpdateDbConnection};
+use orm::schema::{connection_groups, db_connections};
 use shared::DbConnectionRecord;
 use uuid::Uuid;
 
@@ -21,9 +22,12 @@ pub async fn connection_list(
     .await
 }
 
-/// Creates the connection when its `id` is empty, otherwise updates it.
+/// Creates the connection when its `id` is empty, otherwise updates it. The
+/// connection joins the group called `group_name`, which is created if it is
+/// new; an empty name leaves it ungrouped. `record.group_id` is ignored.
 pub async fn connection_save(
     record: DbConnectionRecord,
+    group_name: String,
     pool: crate::app::State<'_, DbPool>,
 ) -> Result<DbConnectionRecord, String> {
     let pool = pool.inner().clone();
@@ -32,37 +36,77 @@ pub async fn connection_save(
         if name.is_empty() {
             return Err("connection name is required".to_string());
         }
-        let now = Utc::now().naive_utc();
-        let fields = UpdateDbConnection {
-            name,
-            driver: record.driver,
-            group_id: record.group_id,
-            host: record.host,
-            port: record.port,
-            database: record.database,
-            username: record.username,
-            password: record.password,
-            ssl_mode: record.ssl_mode,
-            path: record.path,
-            read_only: record.read_only,
-            updated_at: now,
-        };
-        let saved = if record.id.is_empty() {
-            diesel::insert_into(db_connections::table)
-                .values(&NewDbConnection {
-                    id: Uuid::new_v4().to_string(),
-                    created_at: now,
-                    fields,
-                })
-                .get_result::<DbConnection>(connection)
-        } else {
-            diesel::update(db_connections::table.find(record.id))
-                .set(&fields)
-                .get_result::<DbConnection>(connection)
-        };
-        saved.map(to_record).map_err(internal_error)
+        connection
+            .transaction(|connection| {
+                let now = Utc::now().naive_utc();
+                let fields = UpdateDbConnection {
+                    name,
+                    driver: record.driver,
+                    group_id: group_id(connection, group_name.trim())?,
+                    host: record.host,
+                    port: record.port,
+                    database: record.database,
+                    username: record.username,
+                    password: record.password,
+                    ssl_mode: record.ssl_mode,
+                    path: record.path,
+                    read_only: record.read_only,
+                    updated_at: now,
+                };
+                let saved = if record.id.is_empty() {
+                    diesel::insert_into(db_connections::table)
+                        .values(&NewDbConnection {
+                            id: Uuid::new_v4().to_string(),
+                            created_at: now,
+                            fields,
+                        })
+                        .get_result::<DbConnection>(connection)?
+                } else {
+                    diesel::update(db_connections::table.find(record.id))
+                        .set(&fields)
+                        .get_result::<DbConnection>(connection)?
+                };
+                drop_empty_groups(connection)?;
+                Ok(to_record(saved))
+            })
+            .map_err(internal_error)
     })
     .await
+}
+
+/// The id of the group called `name`, creating it if needed.
+fn group_id(connection: &mut SqliteConnection, name: &str) -> QueryResult<Option<String>> {
+    if name.is_empty() {
+        return Ok(None);
+    }
+    let existing = connection_groups::table
+        .filter(connection_groups::name.eq(name))
+        .select(connection_groups::id)
+        .first::<String>(connection)
+        .optional()?;
+    if existing.is_some() {
+        return Ok(existing);
+    }
+    let now = Utc::now().naive_utc();
+    let id = Uuid::new_v4().to_string();
+    diesel::insert_into(connection_groups::table)
+        .values(&NewConnectionGroup {
+            id: id.clone(),
+            name: name.to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .execute(connection)?;
+    Ok(Some(id))
+}
+
+/// A group exists only while a connection is in it.
+fn drop_empty_groups(connection: &mut SqliteConnection) -> QueryResult<usize> {
+    diesel::sql_query(
+        "DELETE FROM connection_groups WHERE id NOT IN \
+         (SELECT group_id FROM db_connections WHERE group_id IS NOT NULL)",
+    )
+    .execute(connection)
 }
 
 pub async fn connection_delete(
@@ -71,8 +115,11 @@ pub async fn connection_delete(
 ) -> Result<(), String> {
     let pool = pool.inner().clone();
     run_db(pool, move |connection| {
-        diesel::delete(db_connections::table.find(id))
-            .execute(connection)
+        connection
+            .transaction(|connection| {
+                diesel::delete(db_connections::table.find(id)).execute(connection)?;
+                drop_empty_groups(connection)
+            })
             .map(|_| ())
             .map_err(internal_error)
     })

@@ -1,0 +1,572 @@
+//! The object tree: groups, their connections, and the tables and columns of
+//! each connection that is open. It owns which connections are open.
+
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::list::ListItem;
+use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::tree::{tree, TreeEntry, TreeEvent, TreeItem, TreeState};
+use gpui_kit::component::{h_flex, v_flex, Sizable as _};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
+use shared::DbConnectionRecord;
+
+use crate::db::{ObjectKind, SessionManager, TableInfo, TableRef};
+use crate::ui::bridge::backend;
+use crate::ui::i18n::t;
+use crate::ui::icons::lucide;
+use crate::ui::stencil;
+use crate::ui::store::{store, Route, Store};
+use crate::ui::theme;
+use crate::ui::views::common;
+
+/// Where a saved connection stands.
+#[derive(Clone)]
+pub enum ConnectionState {
+    Connecting,
+    Live(Rc<Vec<TableInfo>>),
+    Failed(SharedString),
+}
+
+pub enum NavigatorEvent {
+    /// The user asked to see a table's rows.
+    OpenTable { connection: String, table: TableRef },
+}
+
+/// What a tree row stands for, by tree item id.
+#[derive(Clone)]
+enum Node {
+    Group {
+        code: SharedString,
+        count: usize,
+        line: Rgba,
+    },
+    Connection {
+        id: String,
+        state: Option<ConnectionState>,
+    },
+    Table {
+        connection: String,
+        table: TableRef,
+        kind: ObjectKind,
+    },
+    Column {
+        type_name: SharedString,
+        primary_key: bool,
+    },
+    /// A line of text under a connection: an error, or "no tables".
+    Note { failed: bool },
+}
+
+pub struct Navigator {
+    store: Entity<Store>,
+    tree: Entity<TreeState>,
+    filter: Entity<InputState>,
+    states: HashMap<String, ConnectionState>,
+    /// Rows the user opened or closed; the rest keep their default.
+    expanded: HashMap<SharedString, bool>,
+    nodes: Rc<HashMap<SharedString, Node>>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl EventEmitter<NavigatorEvent> for Navigator {}
+
+impl Navigator {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let store = store(cx);
+        let tree = cx.new(|cx| TreeState::new(cx));
+        let filter = cx.new(|cx| InputState::new(window, cx).placeholder(t("Filter tables")));
+        let _subscriptions = vec![
+            cx.observe(&store, |this, _, cx| this.reconcile(cx)),
+            cx.subscribe(&filter, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.rebuild(cx);
+                }
+            }),
+            cx.subscribe(&tree, |this, _, event: &TreeEvent, _| match event {
+                TreeEvent::Expanded(id) => {
+                    this.expanded.insert(id.clone(), true);
+                }
+                TreeEvent::Collapsed(id) => {
+                    this.expanded.insert(id.clone(), false);
+                }
+            }),
+        ];
+        let mut navigator = Self {
+            store,
+            tree,
+            filter,
+            states: HashMap::new(),
+            expanded: HashMap::new(),
+            nodes: Rc::default(),
+            _subscriptions,
+        };
+        navigator.rebuild(cx);
+        navigator
+    }
+
+    pub fn state(&self, connection: &str) -> Option<&ConnectionState> {
+        self.states.get(connection)
+    }
+
+    /// Opens the connection and loads its tables.
+    pub fn connect(&mut self, id: String, cx: &mut Context<Self>) {
+        let Some(record) = self.store.read(cx).connection(&id).cloned() else {
+            return;
+        };
+        self.states.insert(id.clone(), ConnectionState::Connecting);
+        self.rebuild(cx);
+        let app = self.store.read(cx).app();
+        cx.spawn(async move |this, cx| {
+            let loaded = backend(async move {
+                let session = app.state::<SessionManager>().connect(&record).await?;
+                session.tables().await
+            })
+            .await;
+            let _ = this.update(cx, |this, cx| {
+                let state = match loaded {
+                    Ok(tables) => ConnectionState::Live(Rc::new(tables)),
+                    Err(error) => ConnectionState::Failed(error.into()),
+                };
+                this.states.insert(id, state);
+                this.rebuild(cx);
+            });
+        })
+        .detach();
+    }
+
+    pub fn disconnect(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.store
+            .read(cx)
+            .app()
+            .state::<SessionManager>()
+            .disconnect(id);
+        self.states.remove(id);
+        self.rebuild(cx);
+    }
+
+    fn delete(&mut self, record: DbConnectionRecord, window: &mut Window, cx: &mut Context<Self>) {
+        let navigator = cx.weak_entity();
+        let id = record.id;
+        common::confirm_delete(
+            t("Delete connection?"),
+            t("The saved connection is removed. The database itself is not touched."),
+            Some(record.name.into()),
+            t("Delete"),
+            window,
+            cx,
+            move |_, cx| {
+                let id = id.clone();
+                let _ = navigator.update(cx, |this, cx| {
+                    this.disconnect(&id, cx);
+                    let app = this.store.read(cx).app();
+                    let store = this.store.clone();
+                    cx.spawn(async move |_, cx| {
+                        let deleted = backend(async move {
+                            crate::store::connections::connection_delete(id, app.state()).await
+                        })
+                        .await;
+                        if let Err(error) = deleted {
+                            tracing::warn!(error, "Failed to delete connection");
+                        }
+                        store.update(cx, |store, cx| store.refresh(cx));
+                    })
+                    .detach();
+                });
+            },
+        );
+    }
+
+    /// Drops the state of connections that were edited or deleted, then redraws.
+    fn reconcile(&mut self, cx: &mut Context<Self>) {
+        let app = self.store.read(cx).app();
+        let sessions = app.state::<SessionManager>();
+        let store = self.store.read(cx);
+        self.states.retain(|id, state| {
+            store.connection(id).is_some()
+                && (!matches!(state, ConnectionState::Live(_)) || sessions.get(id).is_some())
+        });
+        self.rebuild(cx);
+    }
+
+    fn is_expanded(&self, id: &SharedString, default: bool) -> bool {
+        self.expanded.get(id).copied().unwrap_or(default)
+    }
+
+    /// Rebuilds the tree from the saved connections and what is open.
+    fn rebuild(&mut self, cx: &mut Context<Self>) {
+        let filter = self.filter.read(cx).value().trim().to_lowercase();
+        let store = self.store.read(cx);
+        let mut nodes = HashMap::new();
+        let mut items = Vec::new();
+
+        let ungrouped = store
+            .connections
+            .iter()
+            .filter(|connection| connection.group_id.is_none());
+        for connection in ungrouped {
+            items.push(self.connection_item(connection, &filter, &mut nodes));
+        }
+        for group in &store.groups {
+            let members: Vec<&DbConnectionRecord> = store
+                .connections
+                .iter()
+                .filter(|connection| connection.group_id.as_deref() == Some(group.id.as_str()))
+                .collect();
+            let id = SharedString::from(format!("group:{}", group.id));
+            nodes.insert(
+                id.clone(),
+                Node::Group {
+                    code: stencil::group_prefix(&group.name).into(),
+                    count: members.len(),
+                    line: stencil::line_color(&group.id, &store.groups).0,
+                },
+            );
+            let children: Vec<TreeItem> = members
+                .into_iter()
+                .map(|connection| self.connection_item(connection, &filter, &mut nodes))
+                .collect();
+            items.push(
+                TreeItem::new(id.clone(), group.name.clone())
+                    .children(children)
+                    .expanded(self.is_expanded(&id, true)),
+            );
+        }
+
+        self.nodes = Rc::new(nodes);
+        self.tree.update(cx, |tree, cx| tree.set_items(items, cx));
+        cx.notify();
+    }
+
+    fn connection_item(
+        &self,
+        connection: &DbConnectionRecord,
+        filter: &str,
+        nodes: &mut HashMap<SharedString, Node>,
+    ) -> TreeItem {
+        let id = SharedString::from(format!("connection:{}", connection.id));
+        let state = self.states.get(&connection.id).cloned();
+        let mut children = Vec::new();
+        let mut note = |text: SharedString, failed: bool, children: &mut Vec<TreeItem>| {
+            let note_id = SharedString::from(format!("note:{}", connection.id));
+            nodes.insert(note_id.clone(), Node::Note { failed });
+            children.push(TreeItem::new(note_id, text));
+        };
+        match &state {
+            Some(ConnectionState::Failed(error)) => note(error.clone(), true, &mut children),
+            Some(ConnectionState::Live(tables)) if tables.is_empty() => {
+                note(t("No tables"), false, &mut children)
+            }
+            _ => {}
+        }
+        if let Some(ConnectionState::Live(tables)) = &state {
+            for table in tables.iter() {
+                if !filter.is_empty() && !table.table.name.to_lowercase().contains(filter) {
+                    continue;
+                }
+                children.push(table_item(&connection.id, table, &self.expanded, nodes));
+            }
+        }
+        nodes.insert(
+            id.clone(),
+            Node::Connection {
+                id: connection.id.clone(),
+                state,
+            },
+        );
+        TreeItem::new(id.clone(), connection.name.clone())
+            .children(children)
+            .expanded(self.is_expanded(&id, true))
+    }
+
+    fn render_header(&self, cx: &Context<Self>) -> impl IntoElement {
+        let store = self.store.clone();
+        h_flex()
+            .flex_shrink_0()
+            .gap_1()
+            .p_2()
+            .border_b_1()
+            .border_color(theme::RIB)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(Input::new(&self.filter).small().cleanable(true)),
+            )
+            .child(
+                Button::new("new-connection")
+                    .ghost()
+                    .small()
+                    .icon(lucide("plus"))
+                    .tooltip(t("New connection"))
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        store.update(cx, |store, cx| {
+                            store.navigate(Route::ConnectionForm(None), cx)
+                        });
+                    })),
+            )
+    }
+}
+
+fn table_item(
+    connection: &str,
+    table: &TableInfo,
+    expanded: &HashMap<SharedString, bool>,
+    nodes: &mut HashMap<SharedString, Node>,
+) -> TreeItem {
+    let id = SharedString::from(format!("table:{connection}:{}", table.table.quoted()));
+    nodes.insert(
+        id.clone(),
+        Node::Table {
+            connection: connection.to_string(),
+            table: table.table.clone(),
+            kind: table.kind,
+        },
+    );
+    let columns = table.columns.iter().map(|column| {
+        let column_id = SharedString::from(format!("{id}:{}", column.name));
+        nodes.insert(
+            column_id.clone(),
+            Node::Column {
+                type_name: column.type_name.clone().into(),
+                primary_key: column.primary_key,
+            },
+        );
+        TreeItem::new(column_id, column.name.clone())
+    });
+    TreeItem::new(id.clone(), table.table.name.clone())
+        .children(columns)
+        .expanded(expanded.get(&id).copied().unwrap_or(false))
+}
+
+/// One shape per connection state: a dot when live, a ring while connecting,
+/// the HELD seal when it failed.
+pub fn state_shape(state: Option<&ConnectionState>) -> AnyElement {
+    match state {
+        Some(ConnectionState::Live(_)) => div()
+            .size_2()
+            .flex_shrink_0()
+            .rounded_full()
+            .bg(theme::STENCIL)
+            .into_any_element(),
+        Some(ConnectionState::Connecting) => div()
+            .size_2()
+            .flex_shrink_0()
+            .rounded_full()
+            .border_2()
+            .border_color(theme::STENCIL)
+            .into_any_element(),
+        Some(ConnectionState::Failed(_)) => div()
+            .flex_shrink_0()
+            .px_1()
+            .bg(theme::STENCIL)
+            .text_size(px(11.))
+            .text_color(theme::SEAL)
+            .child(t("HELD"))
+            .into_any_element(),
+        None => div().size_2().flex_shrink_0().into_any_element(),
+    }
+}
+
+fn chip(text: impl IntoElement) -> Div {
+    div()
+        .flex_shrink_0()
+        .px_1p5()
+        .rounded(theme::RADIUS)
+        .border_1()
+        .border_color(theme::hairline())
+        .bg(theme::RIB)
+        .text_size(px(11.))
+        .text_color(theme::STENCIL_DIM)
+        .child(text)
+}
+
+fn render_row(entry: &TreeEntry, node: Option<&Node>, selected: bool) -> ListItem {
+    let item = entry.item();
+    let chevron = if !entry.is_folder() {
+        div().size_3().flex_shrink_0().into_any_element()
+    } else if entry.is_expanded() {
+        lucide("chevron-down")
+            .size_3()
+            .flex_shrink_0()
+            .text_color(theme::STENCIL_MUTE)
+            .into_any_element()
+    } else {
+        lucide("chevron-right")
+            .size_3()
+            .flex_shrink_0()
+            .text_color(theme::STENCIL_MUTE)
+            .into_any_element()
+    };
+    let label = div()
+        .flex_1()
+        .min_w_0()
+        .truncate()
+        .child(item.label.clone());
+    let icon = |name: &'static str| {
+        lucide(name)
+            .size_3p5()
+            .flex_shrink_0()
+            .text_color(theme::STENCIL_MUTE)
+    };
+
+    let row = h_flex()
+        .w_full()
+        .min_w_0()
+        .gap_1p5()
+        .pl(px(12. * entry.depth() as f32))
+        .child(chevron);
+    let row = match node {
+        Some(Node::Group { code, count, line }) => row
+            .child(div().w_2().h_3().flex_shrink_0().bg(*line))
+            .child(label.text_color(theme::STENCIL))
+            .child(chip(code.clone()))
+            .child(chip(count.to_string()).text_color(theme::STENCIL_MUTE)),
+        Some(Node::Connection { state, .. }) => row
+            .child(icon("database"))
+            .child(label.text_color(theme::STENCIL))
+            .child(state_shape(state.as_ref())),
+        Some(Node::Table { kind, .. }) => row
+            .child(icon(match kind {
+                ObjectKind::Table => "table-2",
+                ObjectKind::View => "eye",
+            }))
+            .child(label),
+        Some(Node::Column {
+            type_name,
+            primary_key,
+        }) => row
+            .child(if *primary_key {
+                icon("key-round").into_any_element()
+            } else {
+                div().size_3p5().flex_shrink_0().into_any_element()
+            })
+            .child(label)
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .text_color(theme::STENCIL_FAINT)
+                    .child(type_name.to_lowercase()),
+            ),
+        Some(Node::Note { failed }) => row.child(label.text_color(if *failed {
+            theme::AMBER_TEXT
+        } else {
+            theme::STENCIL_FAINT
+        })),
+        None => row.child(label),
+    };
+
+    ListItem::new(item.id.clone())
+        .h_6()
+        .px_2()
+        .py_0()
+        .text_xs()
+        .text_color(theme::STENCIL_DIM)
+        .when(selected, |item| item.bg(theme::RIB))
+        .child(row)
+}
+
+impl Render for Navigator {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let empty = self.store.read(cx).connections.is_empty();
+        let nodes = self.nodes.clone();
+        let menu_nodes = self.nodes.clone();
+        let navigator = cx.weak_entity();
+        let menu_navigator = cx.weak_entity();
+
+        let body = if empty {
+            div()
+                .p_4()
+                .text_xs()
+                .text_color(theme::STENCIL_MUTE)
+                .child(t("No connections yet"))
+                .into_any_element()
+        } else {
+            tree(&self.tree, move |_, entry, selected, _, _| {
+                let node = nodes.get(&entry.item().id);
+                let row = render_row(entry, node, selected);
+                let navigator = navigator.clone();
+                match node.cloned() {
+                    // A click opens a connection that is not open yet.
+                    Some(Node::Connection { id, state })
+                        if !matches!(
+                            state,
+                            Some(ConnectionState::Live(_) | ConnectionState::Connecting)
+                        ) =>
+                    {
+                        row.on_click(move |_, _, cx| {
+                            let id = id.clone();
+                            let _ = navigator.update(cx, |this, cx| this.connect(id, cx));
+                        })
+                    }
+                    Some(Node::Table {
+                        connection, table, ..
+                    }) => row.on_click(move |event, _, cx| {
+                        if event.click_count() == 2 {
+                            let _ = navigator.update(cx, |_, cx| {
+                                cx.emit(NavigatorEvent::OpenTable {
+                                    connection: connection.clone(),
+                                    table: table.clone(),
+                                })
+                            });
+                        }
+                    }),
+                    _ => row,
+                }
+            })
+            .context_menu(move |_, entry, menu, _, cx| {
+                let Some(Node::Connection { id, state }) = menu_nodes.get(&entry.item().id) else {
+                    return menu;
+                };
+                let Some(navigator) = menu_navigator.upgrade() else {
+                    return menu;
+                };
+                let store = navigator.read(cx).store.clone();
+                let Some(record) = store.read(cx).connection(id).cloned() else {
+                    return menu;
+                };
+                let open = matches!(
+                    state,
+                    Some(ConnectionState::Live(_) | ConnectionState::Connecting)
+                );
+                let toggle = {
+                    let (navigator, id) = (navigator.clone(), id.clone());
+                    PopupMenuItem::new(if open { t("Disconnect") } else { t("Connect") }).on_click(
+                        move |_, _, cx| {
+                            navigator.update(cx, |this, cx| {
+                                if open {
+                                    this.disconnect(&id, cx);
+                                } else {
+                                    this.connect(id.clone(), cx);
+                                }
+                            });
+                        },
+                    )
+                };
+                let edit = {
+                    let id = id.clone();
+                    PopupMenuItem::new(t("Edit")).on_click(move |_, _, cx| {
+                        store.update(cx, |store, cx| {
+                            store.navigate(Route::ConnectionForm(Some(id.clone())), cx)
+                        });
+                    })
+                };
+                let delete = PopupMenuItem::new(t("Delete")).on_click(move |_, window, cx| {
+                    let record = record.clone();
+                    navigator.update(cx, |this, cx| this.delete(record, window, cx));
+                });
+                menu.item(toggle).item(edit).separator().item(delete)
+            })
+            .into_any_element()
+        };
+
+        v_flex()
+            .size_full()
+            .bg(theme::RAIL)
+            .child(self.render_header(cx))
+            .child(div().flex_1().min_h_0().py_1().child(body))
+    }
+}

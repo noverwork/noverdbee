@@ -70,6 +70,55 @@ mod shots {
         }
     }
 
+    /// A SQLite database to browse, and saved connections in and out of groups.
+    /// Returns the id of the connection to the database.
+    fn seed(app: &desktop_lib::app::AppHandle, directory: &std::path::Path) -> String {
+        use desktop_lib::db::{Session, DRIVER_SQLITE};
+        use desktop_lib::store::connections::connection_save;
+        use shared::DbConnectionRecord;
+
+        let path = directory.join("shop.db").to_string_lossy().into_owned();
+        let sqlite = |name: &str, path: &str| DbConnectionRecord {
+            name: name.to_string(),
+            driver: DRIVER_SQLITE.to_string(),
+            path: path.to_string(),
+            ..Default::default()
+        };
+        desktop_lib::app::runtime().block_on(async {
+            let session = Session::open(&sqlite("seed", &path)).await.expect("seed db");
+            let results = session
+                .run(
+                    "CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT, created_at TEXT NOT NULL);
+                     CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers (id), total NUMERIC NOT NULL, note TEXT);
+                     CREATE VIEW big_orders AS SELECT * FROM orders WHERE total > 100;
+                     INSERT INTO customers (name, email, created_at) VALUES
+                       ('Ann Lee', 'ann@example.com', '2026-01-02 09:14:00'),
+                       ('Bo Chen', NULL, '2026-02-11 17:40:12'),
+                       ('O''Brien & Sons', 'hello@obrien.example', '2026-03-05 08:00:00');
+                     INSERT INTO orders (customer_id, total, note) VALUES (1, 42.5, NULL), (1, 310, 'gift wrap'), (3, 1280.75, NULL);"
+                        .to_string(),
+                )
+                .await;
+            assert_eq!(results.len(), 5, "seed statements ran: {results:?}");
+
+            let mut shop = String::new();
+            for (name, file, group) in [
+                ("shop", path.as_str(), "Production"),
+                ("shop-replica", "/var/data/replica.db", "Production"),
+                ("staging", "/var/data/staging.db", "Staging"),
+                ("scratch", "/tmp/scratch.db", ""),
+            ] {
+                let saved = connection_save(sqlite(name, file), group.to_string(), app.state())
+                    .await
+                    .expect("save connection");
+                if name == "shop" {
+                    shop = saved.id;
+                }
+            }
+            shop
+        })
+    }
+
     /// Opens the main window offscreen at `width` x `height` points.
     fn open_stage(
         app: &desktop_lib::app::AppHandle,
@@ -116,9 +165,48 @@ mod shots {
         std::fs::create_dir_all(&out).expect("screenshot dir");
 
         let app = desktop_lib::bootstrap::backend().expect("backend starts");
+        let shop = seed(&app, data.path());
         let mut stage = open_stage(&app, out, 1200., 800.);
 
         stage.shoot("databases");
+
+        // Open one connection and fail another, to see both states.
+        let failing = stage.store(|store, _| {
+            let staging = store.connections.iter().find(|row| row.name == "staging");
+            staging.map(|row| row.id.clone()).expect("staging is saved")
+        });
+        stage
+            .cx
+            .update_window(stage.window, |_, window, cx| {
+                let shell = gpui_kit::base::Root::read(window, cx)
+                    .view()
+                    .clone()
+                    .downcast::<ui::shell::Shell>()
+                    .expect("the window shows the shell");
+                let navigator = shell
+                    .read(cx)
+                    .workspace()
+                    .expect("the workspace is open")
+                    .read(cx)
+                    .navigator()
+                    .clone();
+                navigator.update(cx, |navigator, cx| {
+                    navigator.connect(shop.clone(), cx);
+                    navigator.connect(failing, cx);
+                });
+            })
+            .ok();
+        stage.settle(Duration::from_millis(500));
+        stage.shoot("navigator");
+
+        for (name, route) in [
+            ("connection-new", Route::ConnectionForm(None)),
+            ("connection-edit", Route::ConnectionForm(Some(shop))),
+        ] {
+            stage.store(|store, cx| store.navigate(route, cx));
+            stage.settle(Duration::from_millis(300));
+            stage.shoot(name);
+        }
 
         stage.store(|store, cx| store.navigate(Route::Settings, cx));
         stage.settle(Duration::from_millis(500));

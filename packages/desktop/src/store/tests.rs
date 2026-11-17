@@ -73,85 +73,62 @@ async fn settings_upsert_by_key_instead_of_piling_up_rows() {
 }
 
 #[tokio::test]
-async fn groups_list_by_name_and_reject_blank_names() {
+async fn saving_connections_makes_and_drops_their_groups() {
     let (app, _directory) = test_app();
-
-    for name in ["staging", " production "] {
-        super::groups::group_create(name.to_string(), app.state())
+    let save = |record: shared::DbConnectionRecord, group: &str| {
+        super::connections::connection_save(record, group.to_string(), app.state())
+    };
+    let groups = || async {
+        super::groups::group_list(app.state())
             .await
-            .expect("create group");
-    }
-    assert!(super::groups::group_create("  ".to_string(), app.state())
-        .await
-        .is_err());
+            .expect("list groups")
+            .into_iter()
+            .map(|group| group.name)
+            .collect::<Vec<_>>()
+    };
+    let new = |name: &str| shared::DbConnectionRecord {
+        name: name.to_string(),
+        driver: "postgres".to_string(),
+        password: "secret".to_string(),
+        ..Default::default()
+    };
 
-    let names: Vec<String> = super::groups::group_list(app.state())
-        .await
-        .expect("list groups")
-        .into_iter()
-        .map(|group| group.name)
-        .collect();
-    assert_eq!(names, ["production", "staging"]);
-}
+    let orders = save(new(" orders "), " production ").await.expect("create");
+    let billing = save(new("billing"), "production").await.expect("create");
+    assert_eq!(orders.name, "orders");
+    assert_eq!(orders.group_id, billing.group_id, "one group per name");
+    assert_eq!(groups().await, ["production"]);
+    assert!(save(new("  "), "").await.is_err(), "a name is required");
 
-#[tokio::test]
-async fn connections_save_update_and_outlive_their_group() {
-    let (app, _directory) = test_app();
-    let group = super::groups::group_create("production".to_string(), app.state())
-        .await
-        .expect("create group");
-
-    let created = super::connections::connection_save(
-        shared::DbConnectionRecord {
-            name: " orders ".to_string(),
-            driver: "postgres".to_string(),
-            group_id: Some(group.id.clone()),
-            host: "10.0.0.5".to_string(),
-            port: 5432,
-            password: "secret".to_string(),
-            ..Default::default()
-        },
-        app.state(),
-    )
-    .await
-    .expect("create connection");
-    assert!(!created.id.is_empty());
-    assert_eq!(created.name, "orders");
-
-    let updated = super::connections::connection_save(
+    let moved = save(
         shared::DbConnectionRecord {
             name: "orders-ro".to_string(),
             read_only: true,
-            ..created.clone()
+            ..orders.clone()
         },
-        app.state(),
+        "staging",
     )
     .await
-    .expect("update connection");
-    assert_eq!(updated.id, created.id);
+    .expect("update");
+    assert_eq!(moved.id, orders.id);
+    assert_eq!(groups().await, ["production", "staging"]);
 
-    super::groups::group_delete(group.id, app.state())
-        .await
-        .expect("delete group");
+    let ungrouped = save(billing.clone(), "").await.expect("ungroup");
+    assert_eq!(ungrouped.group_id, None);
+    assert_eq!(groups().await, ["staging"], "an empty group goes away");
+
     let listed = super::connections::connection_list(app.state())
         .await
         .expect("list connections");
-    assert_eq!(listed.len(), 1, "an update must not add a row");
-    assert_eq!(listed[0].name, "orders-ro");
-    assert!(listed[0].read_only);
-    assert_eq!(listed[0].password, "secret");
-    assert_eq!(
-        listed[0].group_id, None,
-        "the connection outlives its group"
-    );
+    let names: Vec<&str> = listed.iter().map(|row| row.name.as_str()).collect();
+    assert_eq!(names, ["billing", "orders-ro"], "updates must not add rows");
+    assert!(listed[1].read_only);
+    assert_eq!(listed[1].password, "secret");
 
-    super::connections::connection_delete(created.id, app.state())
+    super::connections::connection_delete(orders.id, app.state())
         .await
         .expect("delete connection");
-    assert!(super::connections::connection_list(app.state())
-        .await
-        .expect("list connections")
-        .is_empty());
+    assert!(groups().await.is_empty());
 }
 
 #[tokio::test]

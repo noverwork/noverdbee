@@ -12,6 +12,7 @@ use crate::ui::icons::lucide;
 use crate::ui::store::{store, Route, Store};
 use crate::ui::theme;
 use crate::ui::views;
+use crate::ui::views::workspace::Workspace;
 
 actions!(noverdbee, [OpenSettings]);
 
@@ -31,6 +32,10 @@ pub fn bind_keys(cx: &mut App) {
 
 pub struct Shell {
     store: Entity<Store>,
+    /// The Databases page, kept so open connections and tabs outlive a visit
+    /// to another page. Built on first use, once the saved locale is known,
+    /// because input placeholders are translated when they are created.
+    workspace: Option<Entity<Workspace>>,
     /// The page for the current route; rebuilt when the route changes.
     page: Option<(Route, AnyView)>,
     _subscriptions: Vec<Subscription>,
@@ -42,13 +47,25 @@ impl Shell {
         let changes = cx.observe(&store, |_, _, cx| cx.notify());
         views::start_update_check(window, cx);
         Self {
+            workspace: None,
             store,
             page: None,
             _subscriptions: vec![changes],
         }
     }
 
+    pub fn workspace(&self) -> Option<&Entity<Workspace>> {
+        self.workspace.as_ref()
+    }
+
     fn page(&mut self, route: &Route, window: &mut Window, cx: &mut Context<Self>) -> AnyView {
+        if *route == Route::Databases {
+            return self
+                .workspace
+                .get_or_insert_with(|| cx.new(|cx| Workspace::new(window, cx)))
+                .clone()
+                .into();
+        }
         match &self.page {
             Some((shown, view)) if shown == route => view.clone(),
             _ => {
@@ -84,7 +101,7 @@ impl Shell {
         let route = store.route.clone();
         let store_handle = self.store.clone();
         let active = match route {
-            Route::Databases => "databases",
+            Route::Databases | Route::ConnectionForm(_) => "databases",
             Route::Settings => "settings",
         };
 
@@ -152,7 +169,7 @@ impl Shell {
 
     fn render_header(&self, cx: &Context<Self>) -> impl IntoElement {
         let (label, icon) = match &self.store.read(cx).route {
-            Route::Databases => (t("Databases"), "database"),
+            Route::Databases | Route::ConnectionForm(_) => (t("Databases"), "database"),
             Route::Settings => (t("Settings"), "settings"),
         };
         h_flex().h_9().flex_shrink_0().px_2().bg(theme::RIB).child(
