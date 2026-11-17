@@ -87,6 +87,7 @@ args = ["check"]
 # --- CI Pipeline ---
 [tasks.ci]
 description = "Full CI pipeline: lint, format check, and test"
+workspace = false
 run_task = { name = ["lint", "fmt-check", "test-all"] }
 
 # --- Run ---
