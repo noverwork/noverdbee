@@ -142,5 +142,7 @@
  "Runs one read-only query.": "執行一條唯讀查詢。",
  "Inserts rows into a table.": "新增資料列到資料表。",
  "Updates the rows matching a condition.": "更新符合條件的資料列。",
- "Deletes the rows matching a condition.": "刪除符合條件的資料列。"
+ "Deletes the rows matching a condition.": "刪除符合條件的資料列。",
+ "Schemas": "Schema",
+ "Schemas…": "Schema…"
 }

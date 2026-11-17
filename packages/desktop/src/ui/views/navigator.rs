@@ -1,10 +1,11 @@
 //! The object tree: groups, their connections, and the tables and columns of
 //! each connection that is open. It owns which connections are open.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
@@ -33,6 +34,38 @@ pub enum ConnectionState {
     Failed(SharedString),
 }
 
+/// The schemas the user hid on a connection, by settings key.
+fn hidden_schemas_key(connection: &str) -> String {
+    format!("noverdbee.hidden-schemas.{connection}")
+}
+
+fn hidden_schemas(store: &Store, connection: &str) -> HashSet<String> {
+    store
+        .setting(&hidden_schemas_key(connection))
+        .and_then(|value| serde_json::from_str(value).ok())
+        .unwrap_or_default()
+}
+
+/// Shows or hides `schema` on a connection; saved with the other settings.
+fn set_schema_hidden(
+    store: &mut Store,
+    connection: &str,
+    schema: &str,
+    hidden: bool,
+    cx: &mut Context<Store>,
+) {
+    let mut names = hidden_schemas(store, connection);
+    if hidden {
+        names.insert(schema.to_string());
+    } else {
+        names.remove(schema);
+    }
+    let mut names: Vec<String> = names.into_iter().collect();
+    names.sort();
+    let value = serde_json::to_string(&names).unwrap_or_default();
+    store.set_setting(&hidden_schemas_key(connection), value, cx);
+}
+
 pub enum NavigatorEvent {
     /// A connection finished opening.
     Connected { connection: String },
@@ -59,6 +92,8 @@ enum Node {
         /// The environment's line colour.
         line: Rgba,
     },
+    /// A PostgreSQL schema, holding its tables.
+    Schema { count: usize },
     Table {
         connection: String,
         table: TableRef,
@@ -200,7 +235,13 @@ impl Navigator {
                     let store = this.store.clone();
                     cx.spawn(async move |_, cx| {
                         let deleted = backend(async move {
-                            crate::store::connections::connection_delete(id, app.state()).await
+                            crate::store::connections::connection_delete(id.clone(), app.state())
+                                .await?;
+                            crate::store::settings::delete_setting(
+                                hidden_schemas_key(&id),
+                                app.state(),
+                            )
+                            .await
                         })
                         .await;
                         if let Err(error) = deleted {
@@ -212,6 +253,45 @@ impl Navigator {
                 });
             },
         );
+    }
+
+    /// Lists a connection's schemas with a checkbox each; unticked ones leave
+    /// the tree. Changes apply as they are made.
+    fn choose_schemas(
+        &mut self,
+        connection: String,
+        schemas: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let store = self.store.clone();
+        window.open_alert_dialog(cx, move |alert, _, cx| {
+            let hidden = hidden_schemas(store.read(cx), &connection);
+            let boxes = schemas.iter().map(|schema| {
+                let (store, connection, schema) =
+                    (store.clone(), connection.clone(), schema.clone());
+                Checkbox::new(SharedString::from(format!("schema-{schema}")))
+                    .label(schema.clone())
+                    .checked(!hidden.contains(&schema))
+                    .on_click(move |shown: &bool, window, cx| {
+                        store.update(cx, |store, cx| {
+                            set_schema_hidden(store, &connection, &schema, !*shown, cx)
+                        });
+                        window.refresh();
+                    })
+            });
+            alert
+                .title(t("Schemas"))
+                .description(
+                    v_flex()
+                        .id("schemas")
+                        .max_h(px(360.))
+                        .overflow_y_scroll()
+                        .gap_2()
+                        .children(boxes),
+                )
+                .ok_text(t("Done"))
+        });
     }
 
     /// Asks for a group's new name, then renames it.
@@ -296,6 +376,19 @@ impl Navigator {
         self.rebuild(cx);
     }
 
+    /// Opens or closes a row; the tree no longer toggles rows on a click.
+    fn set_expanded(&mut self, id: SharedString, open: bool, cx: &mut Context<Self>) {
+        self.expanded.insert(id, open);
+        self.rebuild(cx);
+    }
+
+    fn select(&mut self, id: &SharedString, cx: &mut Context<Self>) {
+        self.tree.update(cx, |tree, cx| {
+            let index = tree.index_of(id);
+            tree.set_selected_index(index, cx);
+        });
+    }
+
     fn is_expanded(&self, id: &SharedString, default: bool) -> bool {
         self.expanded.get(id).copied().unwrap_or(default)
     }
@@ -312,7 +405,8 @@ impl Navigator {
             .iter()
             .filter(|connection| connection.group_id.is_none());
         for connection in ungrouped {
-            items.push(self.connection_item(connection, &filter, &mut nodes));
+            let hidden = hidden_schemas(store, &connection.id);
+            items.push(self.connection_item(connection, &filter, &hidden, &mut nodes));
         }
         for group in &store.groups {
             let members: Vec<&DbConnectionRecord> = store
@@ -331,7 +425,10 @@ impl Navigator {
             );
             let children: Vec<TreeItem> = members
                 .into_iter()
-                .map(|connection| self.connection_item(connection, &filter, &mut nodes))
+                .map(|connection| {
+                    let hidden = hidden_schemas(store, &connection.id);
+                    self.connection_item(connection, &filter, &hidden, &mut nodes)
+                })
                 .collect();
             items.push(
                 TreeItem::new(id.clone(), group.name.clone())
@@ -349,6 +446,7 @@ impl Navigator {
         &self,
         connection: &DbConnectionRecord,
         filter: &str,
+        hidden: &HashSet<String>,
         nodes: &mut HashMap<SharedString, Node>,
     ) -> TreeItem {
         let id = SharedString::from(format!("connection:{}", connection.id));
@@ -362,11 +460,50 @@ impl Navigator {
             }
         }
         if let Some(ConnectionState::Live(tables)) = &state {
-            for table in tables.iter() {
-                if !filter.is_empty() && !table.table.label().to_lowercase().contains(filter) {
+            let shown = tables.iter().filter(|table| {
+                !table
+                    .table
+                    .schema
+                    .as_ref()
+                    .is_some_and(|schema| hidden.contains(schema))
+                    && (filter.is_empty() || table.table.label().to_lowercase().contains(filter))
+            });
+            // Tables arrive ordered by schema; SQLite has none and stays flat.
+            let mut schemas: Vec<(String, Vec<TreeItem>)> = Vec::new();
+            for table in shown {
+                let Some(schema) = &table.table.schema else {
+                    let label = table.table.name.clone();
+                    children.push(table_item(
+                        &connection.id,
+                        table,
+                        label,
+                        &self.expanded,
+                        nodes,
+                    ));
                     continue;
+                };
+                let item = table_item(
+                    &connection.id,
+                    table,
+                    table.table.name.clone(),
+                    &self.expanded,
+                    nodes,
+                );
+                match schemas.last_mut() {
+                    Some((name, items)) if name == schema => items.push(item),
+                    _ => schemas.push((schema.clone(), vec![item])),
                 }
-                children.push(table_item(&connection.id, table, &self.expanded, nodes));
+            }
+            for (schema, items) in schemas {
+                let schema_id = SharedString::from(format!("schema:{}:{schema}", connection.id));
+                nodes.insert(schema_id.clone(), Node::Schema { count: items.len() });
+                // public opens by default; every schema opens while filtering.
+                let open = !filter.is_empty() || schema == "public";
+                children.push(
+                    TreeItem::new(schema_id.clone(), schema)
+                        .children(items)
+                        .expanded(self.is_expanded(&schema_id, open)),
+                );
             }
         }
         nodes.insert(
@@ -450,6 +587,7 @@ fn group_menu(
 fn table_item(
     connection: &str,
     table: &TableInfo,
+    label: String,
     expanded: &HashMap<SharedString, bool>,
     nodes: &mut HashMap<SharedString, Node>,
 ) -> TreeItem {
@@ -473,7 +611,7 @@ fn table_item(
         );
         TreeItem::new(column_id, column.name.clone())
     });
-    TreeItem::new(id.clone(), table.table.label())
+    TreeItem::new(id.clone(), label)
         .children(columns)
         .expanded(expanded.get(&id).copied().unwrap_or(false))
 }
@@ -507,21 +645,37 @@ pub fn state_shape(state: Option<&ConnectionState>, color: Rgba) -> AnyElement {
     }
 }
 
-fn render_row(entry: &TreeEntry, node: Option<&Node>, selected: bool) -> ListItem {
+/// Opens or closes one row.
+type Toggle = Box<dyn Fn(&mut App)>;
+
+/// `on_chevron` opens and closes a folder row.
+fn render_row(
+    entry: &TreeEntry,
+    node: Option<&Node>,
+    selected: bool,
+    on_chevron: Toggle,
+) -> ListItem {
     let item = entry.item();
     let chevron = if !entry.is_folder() {
         div().size_3().flex_shrink_0().into_any_element()
-    } else if entry.is_expanded() {
-        lucide("chevron-down")
-            .size_3()
-            .flex_shrink_0()
-            .text_color(theme::STENCIL_MUTE)
-            .into_any_element()
     } else {
-        lucide("chevron-right")
-            .size_3()
+        let icon = lucide(if entry.is_expanded() {
+            "chevron-down"
+        } else {
+            "chevron-right"
+        })
+        .size_3()
+        .flex_shrink_0()
+        .text_color(theme::STENCIL_MUTE);
+        div()
+            .id(SharedString::from(format!("chevron:{}", item.id)))
             .flex_shrink_0()
-            .text_color(theme::STENCIL_MUTE)
+            .cursor_pointer()
+            .child(icon)
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                on_chevron(cx);
+            })
             .into_any_element()
     };
     let label = div()
@@ -571,6 +725,12 @@ fn render_row(entry: &TreeEntry, node: Option<&Node>, selected: bool) -> ListIte
                 }
                 _ => state_shape(state.as_ref(), theme::STENCIL),
             }),
+        Some(Node::Schema { count }) => row.child(icon("layers")).child(label).child(
+            div()
+                .flex_shrink_0()
+                .text_color(theme::STENCIL_FAINT)
+                .child(count.to_string()),
+        ),
         Some(Node::Table { kind, .. }) => row
             .child(icon(match kind {
                 ObjectKind::Table => "table-2",
@@ -625,35 +785,51 @@ impl Render for Navigator {
         } else {
             tree(&self.tree, move |_, entry, selected, _, _| {
                 let node = nodes.get(&entry.item().id);
-                let row = render_row(entry, node, selected);
+                let item_id = entry.item().id.clone();
+                let open = entry.is_expanded();
+                // Every row: a click selects, the chevron opens and closes,
+                // a double click does the row's main thing.
+                let on_chevron: Toggle = {
+                    let (navigator, id) = (navigator.clone(), item_id.clone());
+                    Box::new(move |cx: &mut App| {
+                        let _ = navigator
+                            .update(cx, |this, cx| this.set_expanded(id.clone(), !open, cx));
+                    })
+                };
+                let row = render_row(entry, node, selected, on_chevron);
                 let navigator = navigator.clone();
-                match node.cloned() {
-                    // A click opens a connection that is not open yet.
-                    Some(Node::Connection { id, state, .. })
-                        if !matches!(
-                            state,
-                            Some(ConnectionState::Live(_) | ConnectionState::Connecting)
-                        ) =>
-                    {
-                        row.on_click(move |_, _, cx| {
-                            let id = id.clone();
-                            let _ = navigator.update(cx, |this, cx| this.connect(id, cx));
-                        })
-                    }
-                    Some(Node::Table {
-                        connection, table, ..
-                    }) => row.on_click(move |event, _, cx| {
-                        if event.click_count() == 2 {
-                            let _ = navigator.update(cx, |_, cx| {
-                                cx.emit(NavigatorEvent::OpenTable {
-                                    connection: connection.clone(),
-                                    table: table.clone(),
-                                })
-                            });
+                let node = node.cloned();
+                row.on_click(move |event, _, cx| {
+                    // The tree would toggle the row on any click; select it here instead.
+                    cx.stop_propagation();
+                    let double = event.click_count() == 2;
+                    let _ = navigator.update(cx, |this, cx| {
+                        this.select(&item_id, cx);
+                        if !double {
+                            return;
                         }
-                    }),
-                    _ => row,
-                }
+                        match &node {
+                            Some(Node::Connection { id, state, .. })
+                                if !matches!(
+                                    state,
+                                    Some(ConnectionState::Live(_) | ConnectionState::Connecting)
+                                ) =>
+                            {
+                                this.connect(id.clone(), cx)
+                            }
+                            Some(Node::Table {
+                                connection, table, ..
+                            }) => cx.emit(NavigatorEvent::OpenTable {
+                                connection: connection.clone(),
+                                table: table.clone(),
+                            }),
+                            Some(
+                                Node::Group { .. } | Node::Connection { .. } | Node::Schema { .. },
+                            ) => this.set_expanded(item_id.clone(), !open, cx),
+                            _ => {}
+                        }
+                    });
+                })
             })
             .context_menu(move |_, entry, menu, _, cx| {
                 let Some(navigator) = menu_navigator.upgrade() else {
@@ -707,12 +883,32 @@ impl Render for Navigator {
                         });
                     })
                 };
+                let mut schemas: Vec<String> = Vec::new();
+                if let Some(ConnectionState::Live(tables)) = state {
+                    for schema in tables
+                        .iter()
+                        .filter_map(|table| table.table.schema.as_ref())
+                    {
+                        if schemas.last() != Some(schema) {
+                            schemas.push(schema.clone());
+                        }
+                    }
+                }
+                let choose = (!schemas.is_empty()).then(|| {
+                    let (navigator, id) = (navigator.clone(), id.clone());
+                    PopupMenuItem::new(t("Schemas…")).on_click(move |_, window, cx| {
+                        let (id, schemas) = (id.clone(), schemas.clone());
+                        navigator
+                            .update(cx, |this, cx| this.choose_schemas(id, schemas, window, cx));
+                    })
+                });
                 let delete = PopupMenuItem::new(t("Delete")).on_click(move |_, window, cx| {
                     let record = record.clone();
                     navigator.update(cx, |this, cx| this.delete(record, window, cx));
                 });
                 menu.item(toggle)
                     .item(editor)
+                    .when_some(choose, |menu, choose| menu.item(choose))
                     .separator()
                     .item(edit)
                     .item(delete)
