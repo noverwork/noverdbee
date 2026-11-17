@@ -1,7 +1,7 @@
 //! App-wide UI state: saved data and the current page.
 
 use gpui_kit::*;
-use shared::{HostGroupRecord, Setting};
+use shared::{DbConnectionRecord, GroupRecord, Setting};
 
 use crate::app::AppHandle;
 use crate::ui::bridge::backend;
@@ -18,7 +18,8 @@ pub struct Store {
     pub route: Route,
     pub loading: bool,
     pub load_error: Option<String>,
-    pub groups: Vec<HostGroupRecord>,
+    pub groups: Vec<GroupRecord>,
+    pub connections: Vec<DbConnectionRecord>,
     pub settings: Vec<Setting>,
 }
 
@@ -41,6 +42,7 @@ impl Store {
             loading: true,
             load_error: None,
             groups: Vec::new(),
+            connections: Vec::new(),
             settings: Vec::new(),
         };
         store.refresh(cx);
@@ -65,16 +67,18 @@ impl Store {
             let loaded = backend(async move {
                 Ok::<_, String>((
                     crate::store::settings::get_all_settings(app.state()).await?,
-                    crate::store::groups::host_group_list(app.state()).await?,
+                    crate::store::groups::group_list(app.state()).await?,
+                    crate::store::connections::connection_list(app.state()).await?,
                 ))
             })
             .await;
             let _ = this.update(cx, |this, cx| {
                 match loaded {
-                    Ok((settings, groups)) => {
+                    Ok((settings, groups, connections)) => {
                         let first_load = this.loading;
                         this.settings = settings;
                         this.groups = groups;
+                        this.connections = connections;
                         this.load_error = None;
                         if first_load {
                             let saved = this.setting(i18n::LOCALE_SETTING);

@@ -1,7 +1,7 @@
-//! The stencil code and line colour that mark which group a host belongs to.
+//! The stencil code and line colour that mark which group a connection belongs to.
 
 use gpui_kit::Rgba;
-use shared::HostGroupRecord;
+use shared::GroupRecord;
 
 const fn line(value: u32, dark_text: bool) -> (Rgba, bool) {
     let fill = Rgba {
@@ -26,8 +26,8 @@ const UNGROUPED_LINE: (Rgba, bool) = line(0x2a2f36, false);
 /// list never share a colour until there are more groups than colours.
 // ponytail: renaming a group can shift colours; store a per-group colour if
 // users want them pinned.
-pub fn line_color(group_id: &str, groups: &[HostGroupRecord]) -> (Rgba, bool) {
-    let mut sorted: Vec<&HostGroupRecord> = groups.iter().collect();
+pub fn line_color(group_id: &str, groups: &[GroupRecord]) -> (Rgba, bool) {
+    let mut sorted: Vec<&GroupRecord> = groups.iter().collect();
     sorted.sort_by(|left, right| left.name.cmp(&right.name));
     match sorted.iter().position(|group| group.id == group_id) {
         Some(index) => LINE_COLORS[index % LINE_COLORS.len()],
@@ -52,13 +52,13 @@ pub fn group_prefix(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{group_prefix, line_color, LINE_COLORS, UNGROUPED_LINE};
-    use shared::HostGroupRecord;
+    use shared::GroupRecord;
 
     #[test]
     fn prefixes_and_line_colours_follow_group_names() {
         assert_eq!(group_prefix("prod-eu"), "PRO");
         assert_eq!(group_prefix("測試"), "GRP");
-        let group = |id: &str, name: &str| HostGroupRecord {
+        let group = |id: &str, name: &str| GroupRecord {
             id: id.to_string(),
             name: name.to_string(),
         };

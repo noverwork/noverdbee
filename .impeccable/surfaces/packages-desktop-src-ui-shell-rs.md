@@ -119,5 +119,4 @@ GPUI Kit modules: `tree` (navigator), `tab` (workspace strip), `resizable` (navi
 
 ## Unresolved
 - Groups have no stored colour; line colour is derived deterministically from the group. User-assigned colours are a later product decision.
-- The group table is still named `host_groups` (store, model, and `HostGroupRecord`); rename it when database connections land.
 - Saved queries, a command palette, and split editors are not designed yet.

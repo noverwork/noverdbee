@@ -49,6 +49,8 @@ diesel_migrations = { version = "2.3", features = ["sqlite"] }
 # one pool connection closes while another opens (save spins forever).
 libsqlite3-sys = { version = "0.38", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
+# The user's SQLite files. Shares the bundled libsqlite3-sys with diesel.
+rusqlite = { version = "0.40", features = ["bundled", "column_decltype"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }

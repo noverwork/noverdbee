@@ -13,6 +13,7 @@ pub fn backend() -> Result<AppHandle, String> {
 
     let app = AppHandle::default();
     app.manage(pool);
+    app.manage(crate::db::SessionManager::default());
     Ok(app)
 }
 

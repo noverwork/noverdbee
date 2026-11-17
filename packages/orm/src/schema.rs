@@ -1,9 +1,28 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
-    host_groups (id) {
+    connection_groups (id) {
         id -> Text,
         name -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    db_connections (id) {
+        id -> Text,
+        name -> Text,
+        driver -> Text,
+        group_id -> Nullable<Text>,
+        host -> Text,
+        port -> Integer,
+        database -> Text,
+        username -> Text,
+        password -> Text,
+        ssl_mode -> Text,
+        path -> Text,
+        read_only -> Bool,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -18,4 +37,6 @@ diesel::table! {
     }
 }
 
-diesel::allow_tables_to_appear_in_same_query!(host_groups, settings,);
+diesel::joinable!(db_connections -> connection_groups (group_id));
+
+diesel::allow_tables_to_appear_in_same_query!(connection_groups, db_connections, settings,);

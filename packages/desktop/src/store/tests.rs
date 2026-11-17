@@ -34,7 +34,7 @@ fn opening_a_fresh_database_applies_migrations_and_enables_wal() {
         .expect("read journal mode");
     assert_eq!(mode.journal_mode, "wal");
 
-    let groups = orm::schema::host_groups::table
+    let groups = orm::schema::connection_groups::table
         .count()
         .get_result::<i64>(&mut connection)
         .expect("migrated schema is queryable");
@@ -77,23 +77,81 @@ async fn groups_list_by_name_and_reject_blank_names() {
     let (app, _directory) = test_app();
 
     for name in ["staging", " production "] {
-        super::groups::host_group_create(name.to_string(), app.state())
+        super::groups::group_create(name.to_string(), app.state())
             .await
             .expect("create group");
     }
-    assert!(
-        super::groups::host_group_create("  ".to_string(), app.state())
-            .await
-            .is_err()
-    );
+    assert!(super::groups::group_create("  ".to_string(), app.state())
+        .await
+        .is_err());
 
-    let names: Vec<String> = super::groups::host_group_list(app.state())
+    let names: Vec<String> = super::groups::group_list(app.state())
         .await
         .expect("list groups")
         .into_iter()
         .map(|group| group.name)
         .collect();
     assert_eq!(names, ["production", "staging"]);
+}
+
+#[tokio::test]
+async fn connections_save_update_and_outlive_their_group() {
+    let (app, _directory) = test_app();
+    let group = super::groups::group_create("production".to_string(), app.state())
+        .await
+        .expect("create group");
+
+    let created = super::connections::connection_save(
+        shared::DbConnectionRecord {
+            name: " orders ".to_string(),
+            driver: "postgres".to_string(),
+            group_id: Some(group.id.clone()),
+            host: "10.0.0.5".to_string(),
+            port: 5432,
+            password: "secret".to_string(),
+            ..Default::default()
+        },
+        app.state(),
+    )
+    .await
+    .expect("create connection");
+    assert!(!created.id.is_empty());
+    assert_eq!(created.name, "orders");
+
+    let updated = super::connections::connection_save(
+        shared::DbConnectionRecord {
+            name: "orders-ro".to_string(),
+            read_only: true,
+            ..created.clone()
+        },
+        app.state(),
+    )
+    .await
+    .expect("update connection");
+    assert_eq!(updated.id, created.id);
+
+    super::groups::group_delete(group.id, app.state())
+        .await
+        .expect("delete group");
+    let listed = super::connections::connection_list(app.state())
+        .await
+        .expect("list connections");
+    assert_eq!(listed.len(), 1, "an update must not add a row");
+    assert_eq!(listed[0].name, "orders-ro");
+    assert!(listed[0].read_only);
+    assert_eq!(listed[0].password, "secret");
+    assert_eq!(
+        listed[0].group_id, None,
+        "the connection outlives its group"
+    );
+
+    super::connections::connection_delete(created.id, app.state())
+        .await
+        .expect("delete connection");
+    assert!(super::connections::connection_list(app.state())
+        .await
+        .expect("list connections")
+        .is_empty());
 }
 
 #[tokio::test]

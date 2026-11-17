@@ -1,46 +1,44 @@
 use chrono::Utc;
 use diesel::prelude::*;
-use orm::models::{HostGroup, NewHostGroup};
-use orm::schema::host_groups;
-use shared::HostGroupRecord;
+use orm::models::{ConnectionGroup, NewConnectionGroup};
+use orm::schema::connection_groups;
+use shared::GroupRecord;
 use uuid::Uuid;
 
 use super::{internal_error, run_db, DbPool};
 
-pub async fn host_group_list(
-    pool: crate::app::State<'_, DbPool>,
-) -> Result<Vec<HostGroupRecord>, String> {
+pub async fn group_list(pool: crate::app::State<'_, DbPool>) -> Result<Vec<GroupRecord>, String> {
     let pool = pool.inner().clone();
     run_db(pool, |connection| {
-        host_groups::table
-            .order(host_groups::name.asc())
-            .load::<HostGroup>(connection)
+        connection_groups::table
+            .order(connection_groups::name.asc())
+            .load::<ConnectionGroup>(connection)
             .map(|groups| groups.into_iter().map(to_record).collect())
             .map_err(internal_error)
     })
     .await
 }
 
-pub async fn host_group_create(
+pub async fn group_create(
     name: String,
     pool: crate::app::State<'_, DbPool>,
-) -> Result<HostGroupRecord, String> {
+) -> Result<GroupRecord, String> {
     let pool = pool.inner().clone();
     run_db(pool, move |connection| {
         let name = name.trim().to_string();
         if name.is_empty() {
-            return Err("host group name is required".to_string());
+            return Err("group name is required".to_string());
         }
 
         let now = Utc::now().naive_utc();
-        diesel::insert_into(host_groups::table)
-            .values(&NewHostGroup {
+        diesel::insert_into(connection_groups::table)
+            .values(&NewConnectionGroup {
                 id: Uuid::new_v4().to_string(),
                 name,
                 created_at: now,
                 updated_at: now,
             })
-            .get_result::<HostGroup>(connection)
+            .get_result::<ConnectionGroup>(connection)
             .map(to_record)
             .map_err(|error| match error {
                 diesel::result::Error::DatabaseError(
@@ -53,13 +51,10 @@ pub async fn host_group_create(
     .await
 }
 
-pub async fn host_group_delete(
-    id: String,
-    pool: crate::app::State<'_, DbPool>,
-) -> Result<(), String> {
+pub async fn group_delete(id: String, pool: crate::app::State<'_, DbPool>) -> Result<(), String> {
     let pool = pool.inner().clone();
     run_db(pool, move |connection| {
-        diesel::delete(host_groups::table.filter(host_groups::id.eq(id)))
+        diesel::delete(connection_groups::table.filter(connection_groups::id.eq(id)))
             .execute(connection)
             .map(|_| ())
             .map_err(internal_error)
@@ -67,8 +62,8 @@ pub async fn host_group_delete(
     .await
 }
 
-fn to_record(group: HostGroup) -> HostGroupRecord {
-    HostGroupRecord {
+fn to_record(group: ConnectionGroup) -> GroupRecord {
+    GroupRecord {
         id: group.id,
         name: group.name,
     }
