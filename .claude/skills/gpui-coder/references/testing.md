@@ -58,7 +58,7 @@ stage.shoot("keys");
 ## 3. `gpui_kit::test` — not available here
 
 gpui-kit's `test-support` feature (`#[gpui_kit::test]`, `TestWindowExt`, `window.find("id")`,
-`window.click`, `window.press`) pulls in `gpui-fast`, whose dependency pins clash with `russh`.
+`window.click`, `window.press`) pulls in `gpui-fast`, whose dependency pins clashed with other crates when this was set up.
 The repo therefore enables `test-support` on `gpui-pre` and `gpui-pre-platform` directly, in
 `[dev-dependencies]`, and gets `TestAppContext` / `HeadlessAppContext` without the Kit helpers.
 

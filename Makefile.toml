@@ -1,4 +1,4 @@
-# cargo-make configuration for truley-claw
+# cargo-make configuration for noverdbee
 # Install: cargo install cargo-make
 # Usage: cargo make <task>
 
@@ -25,10 +25,6 @@ echo "  cargo make clean          - Clean build artifacts"
 echo "  cargo make dev            - Run the desktop app"
 echo "  cargo make screenshots    - Render every page offscreen to target/screenshots"
 echo "  cargo make bundle         - Package the desktop app for this platform"
-echo "  cargo make ms:start       - Start MS service"
-echo "  cargo make ms:stop        - Stop MS service"
-echo "  cargo make ms:restart     - Restart MS service"
-echo "  cargo make ms:reset       - Reset MS service (delete data)"
 '''
 
 # --- Build ---
@@ -119,34 +115,3 @@ args = ["packager", "--release"]
 description = "Clean build artifacts"
 command = "cargo"
 args = ["clean"]
-
-# --- Custom Scripts ---
-[tasks."ms:start"]
-description = "Start MS service"
-workspace = false
-script = '''
-#!/usr/bin/env bash
-./scripts/start-ms.sh
-'''
-
-[tasks."ms:stop"]
-description = "Stop MS service"
-workspace = false
-script = '''
-#!/usr/bin/env bash
-./scripts/stop-ms.sh
-'''
-
-[tasks."ms:restart"]
-description = "Restart MS service"
-workspace = false
-run_task = { name = ["ms:stop", "ms:start"] }
-
-[tasks."ms:reset"]
-description = "Reset MS service (stop with delete + start)"
-workspace = false
-script = '''
-#!/usr/bin/env bash
-./scripts/stop-ms.sh --delete
-./scripts/start-ms.sh
-'''

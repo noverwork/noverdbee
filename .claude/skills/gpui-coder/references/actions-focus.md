@@ -37,7 +37,7 @@ pub fn bind_keys(cx: &mut App) {
 }
 ```
 
-- Bind once at startup, from `ui::init` (`shell::bind_keys`, `terminal::bind_keys`).
+- Bind once at startup, from `ui::init` (`shell::bind_keys`).
 - `cmd` on macOS, `ctrl` elsewhere — see the `modifier` helper in `shell::bind_keys`.
 - The third argument is a key-context predicate. `None` applies everywhere.
 - Bind keys **before** `cx.set_menus`: menus bake shortcuts in when they are built.

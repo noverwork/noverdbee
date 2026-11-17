@@ -60,7 +60,7 @@ minisign-verify = "0.2"
 [dev-dependencies]
 # Offscreen rendering for the screenshot test. Enabled on the GPUI crates
 # directly: gpui-kit's own `test-support` drags in gpui-fast, whose pins clash
-# with other dependencies in this workspace.
+# with other crates when this was set up.
 gpui-pre = { version = "=0.3.12", features = ["test-support"] }
 gpui-pre-platform = { version = "=0.3.12", features = ["test-support"] }
 tempfile = "3"

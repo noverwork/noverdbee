@@ -5,9 +5,8 @@
 - **Project, `packages/desktop`:** functions return `Result<T, String>`. Convert at the call that
   failed with `.map_err(|error| format!("failed to open database: {error}"))`. The string is shown
   to the user, so name the operation. Shared converters exist per area (`store::internal_error`).
-- **Project, `packages/relay`:** `anyhow::Result<T>` + `.context()`.
 - **Project, domain errors:** when callers branch on the kind of failure, write a plain enum with
-  hand-written `Display` and `impl std::error::Error` (`SftpError` in `runtime/sftp/types.rs`).
+  hand-written `Display` and `impl std::error::Error` (the `SftpError` example below).
   `thiserror` is not a dependency; do not add it for one enum.
 
 ```rust

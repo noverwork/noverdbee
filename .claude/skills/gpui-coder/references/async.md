@@ -2,7 +2,7 @@
 
 ## Two executors
 
-The UI runs on GPUI's executor. The backend (SSH, SFTP, SQLite, HTTP) runs on Tokio
+The UI runs on GPUI's executor. The backend (SQLite, HTTP, database drivers) runs on Tokio
 (`crate::app::runtime()`). A backend future polled on the UI executor has no Tokio reactor and
 fails. `ui/bridge.rs` crosses over:
 

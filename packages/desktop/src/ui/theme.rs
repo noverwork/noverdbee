@@ -21,7 +21,6 @@ const fn white(alpha: f32) -> Rgba {
     }
 }
 
-pub const TERMINAL_INK: Rgba = hex(0x000000);
 pub const PORT: Rgba = hex(0x101317);
 pub const RAIL: Rgba = hex(0x0b0e11);
 pub const RIB: Rgba = hex(0x1a1f25);

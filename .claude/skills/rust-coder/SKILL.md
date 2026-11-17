@@ -1,6 +1,6 @@
 ---
 name: rust-coder
-description: Rust coding guide for this monorepo. Use when writing Rust code in any package (desktop, orm, relay, shared, update-signer). Combines Rust API Guidelines with clearly marked project rules for errors, Tokio, tracing, and Clippy. For GPUI code use gpui-coder; for schema changes use diesel-migration.
+description: Rust coding guide for this monorepo. Use when writing Rust code in any package (desktop, orm, shared, update-signer). Combines Rust API Guidelines with clearly marked project rules for errors, Tokio, tracing, and Clippy. For GPUI code use gpui-coder; for schema changes use diesel-migration.
 ---
 
 # Rust Coder - Convention Guide
@@ -57,7 +57,7 @@ value.expect("must exist");
 
 ### Error Handling
 
-Two styles, by package (**Project**):
+One style in `packages/desktop` (**Project**):
 
 ```rust
 // packages/desktop: Result<T, String>. The string reaches the user, so say what failed.
@@ -66,18 +66,9 @@ pub fn init_pool(database_path: &Path) -> Result<DbPool, String> {
         .build(manager)
         .map_err(|error| format!("failed to open database: {error}"))
 }
-
-// packages/relay: anyhow at the binary's edge.
-use anyhow::{Context, Result};
-
-async fn connect(addr: &str) -> Result<TcpStream> {
-    TcpStream::connect(addr)
-        .await
-        .with_context(|| format!("failed to connect to {addr}"))
-}
 ```
 
-Match the package you are in. Do not add `anyhow` or `thiserror` to `desktop`.
+Do not add `anyhow` or `thiserror` to `desktop`.
 
 ### Async Pattern
 
