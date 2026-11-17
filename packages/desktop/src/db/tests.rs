@@ -396,3 +396,22 @@ async fn postgres_mcp_select_is_read_only_and_writes_run_one_statement() {
     );
     writer.run(format!("DROP TABLE {table}")).await;
 }
+
+#[tokio::test]
+async fn sqlite_paths_may_start_at_the_home_folder() {
+    let home = dirs::home_dir().expect("a home folder");
+    let directory = tempfile::tempdir_in(&home).expect("temp dir in home");
+    let name = directory
+        .path()
+        .file_name()
+        .expect("a name")
+        .to_string_lossy();
+    let record = DbConnectionRecord {
+        driver: DRIVER_SQLITE.to_string(),
+        path: format!("~/{name}/tilde.db"),
+        ..DbConnectionRecord::default()
+    };
+    let session = Session::open(&record).await.expect("open ~ path");
+    session.run("CREATE TABLE t (id INTEGER)".to_string()).await;
+    assert!(directory.path().join("tilde.db").exists());
+}

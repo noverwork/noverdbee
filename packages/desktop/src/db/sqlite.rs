@@ -28,6 +28,7 @@ impl fmt::Debug for SqliteSession {
 
 impl SqliteSession {
     pub async fn open(path: String, read_only: bool) -> Result<Self, String> {
+        let path = expand_home(&path);
         tokio::task::spawn_blocking(move || {
             let access = if read_only {
                 OpenFlags::SQLITE_OPEN_READ_ONLY
@@ -154,6 +155,14 @@ fn select_json(
         out.push(format!("{{{}}}", fields.join(",")));
     }
     Ok((out, false))
+}
+
+/// `~/...` as a path under the home folder; SQLite takes `~` literally.
+fn expand_home(path: &str) -> String {
+    match (path.strip_prefix("~/"), dirs::home_dir()) {
+        (Some(rest), Some(home)) => home.join(rest).to_string_lossy().into_owned(),
+        _ => path.to_string(),
+    }
 }
 
 fn join_error(error: tokio::task::JoinError) -> String {
