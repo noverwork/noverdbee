@@ -239,8 +239,10 @@ impl TableDelegate for EditGrid {
             ColumnSort::Default => None,
         };
         let view = self.view.clone();
-        // The view reads this grid while it reloads, so let this update finish first.
-        cx.defer_in(window, move |_, window, cx| {
+        // The view reads this grid while it reloads, so let this update finish
+        // first. `window.defer`, not `cx.defer_in`: that one runs inside an
+        // update of this grid again.
+        window.defer(cx, move |window, cx| {
             let _ = view.update(cx, |view, cx| {
                 view.order = order;
                 view.load(Load::Replace, window, cx);
@@ -254,7 +256,8 @@ impl TableDelegate for EditGrid {
 
     fn load_more(&mut self, window: &mut Window, cx: &mut Context<TableState<Self>>) {
         let view = self.view.clone();
-        cx.defer_in(window, move |_, window, cx| {
+        // See `perform_sort`.
+        window.defer(cx, move |window, cx| {
             let _ = view.update(cx, |view, cx| view.load(Load::Append, window, cx));
         });
     }
