@@ -102,13 +102,18 @@ mod shots {
             assert_eq!(results.len(), 5, "seed statements ran: {results:?}");
 
             let mut shop = String::new();
-            for (name, file, group) in [
-                ("shop", path.as_str(), "Production"),
-                ("shop-replica", "/var/data/replica.db", "Production"),
-                ("staging", "/var/data/staging.db", "Staging"),
-                ("scratch", "/tmp/scratch.db", ""),
+            use shared::Environment;
+            for (name, file, group, environment) in [
+                ("shop", path.as_str(), "Shop", Environment::Production),
+                ("shop-replica", "/var/data/replica.db", "Shop", Environment::Staging),
+                ("staging", "/var/data/staging.db", "Shop", Environment::Staging),
+                ("scratch", "/tmp/scratch.db", "", Environment::Local),
             ] {
-                let saved = connection_save(sqlite(name, file), group.to_string(), app.state())
+                let record = DbConnectionRecord {
+                    environment,
+                    ..sqlite(name, file)
+                };
+                let saved = connection_save(record, group.to_string(), app.state())
                     .await
                     .expect("save connection");
                 if name == "shop" {
@@ -126,7 +131,7 @@ mod shots {
                 ssl_mode: "require".to_string(),
                 ..Default::default()
             };
-            connection_save(warehouse, "Staging".to_string(), app.state())
+            connection_save(warehouse, "Analytics".to_string(), app.state())
                 .await
                 .expect("save connection");
             shop

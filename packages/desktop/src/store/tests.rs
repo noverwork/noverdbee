@@ -104,6 +104,7 @@ async fn saving_connections_makes_and_drops_their_groups() {
         shared::DbConnectionRecord {
             name: "orders-ro".to_string(),
             read_only: true,
+            environment: shared::Environment::Production,
             ..orders.clone()
         },
         "staging",
@@ -123,6 +124,8 @@ async fn saving_connections_makes_and_drops_their_groups() {
     let names: Vec<&str> = listed.iter().map(|row| row.name.as_str()).collect();
     assert_eq!(names, ["billing", "orders-ro"], "updates must not add rows");
     assert!(listed[1].read_only);
+    assert_eq!(listed[1].environment, shared::Environment::Production);
+    assert_eq!(listed[0].environment, shared::Environment::Development);
     assert_eq!(listed[1].password, "secret");
 
     super::connections::connection_delete(orders.id, app.state())
@@ -181,4 +184,101 @@ fn foreign_database(directory: &TempDir) -> std::path::PathBuf {
         .batch_execute("CREATE TABLE t (x)")
         .expect("create table");
     path
+}
+
+#[test]
+fn connections_take_their_environment_from_the_group_they_were_in() {
+    use diesel::connection::SimpleConnection;
+    use diesel::migration::MigrationSource;
+    use diesel_migrations::MigrationHarness;
+
+    let mut connection = SqliteConnection::establish(":memory:").expect("memory db");
+    let count = MigrationSource::<diesel::sqlite::Sqlite>::migrations(&super::MIGRATIONS)
+        .expect("list")
+        .len();
+    // Every migration before this one.
+    for _ in 1..count {
+        connection
+            .run_next_migration(super::MIGRATIONS)
+            .expect("earlier migration");
+    }
+    connection
+        .batch_execute(
+            "INSERT INTO connection_groups (id, name) VALUES ('p', 'Prod EU'), ('s', 'staging'), ('c', 'client-a');
+         INSERT INTO db_connections (id, name, driver, group_id) VALUES
+           ('1', 'a', 'sqlite', 'p'), ('2', 'b', 'sqlite', 's'),
+           ('3', 'c', 'sqlite', 'c'), ('4', 'd', 'sqlite', NULL);",
+        )
+        .expect("seed");
+    connection
+        .run_next_migration(super::MIGRATIONS)
+        .expect("environment migration");
+
+    let environments: Vec<String> = orm::schema::db_connections::table
+        .order(orm::schema::db_connections::id)
+        .select(orm::schema::db_connections::environment)
+        .load(&mut connection)
+        .expect("read environments");
+    assert_eq!(
+        environments,
+        ["production", "staging", "development", "development"]
+    );
+}
+
+#[tokio::test]
+async fn a_group_renames_merges_into_a_namesake_and_dissolves() {
+    let (app, _directory) = test_app();
+    let save = |name: &str, group: &str| {
+        super::connections::connection_save(
+            shared::DbConnectionRecord {
+                name: name.to_string(),
+                driver: "sqlite".to_string(),
+                ..Default::default()
+            },
+            group.to_string(),
+            app.state(),
+        )
+    };
+    let groups = || async {
+        super::groups::group_list(app.state())
+            .await
+            .expect("list groups")
+    };
+    let a = save("a", "shop").await.expect("save");
+    save("b", "billing").await.expect("save");
+    let shop = a.group_id.clone().expect("in a group");
+
+    super::groups::group_rename(shop.clone(), " store ".to_string(), app.state())
+        .await
+        .expect("rename");
+    let names: Vec<String> = groups().await.into_iter().map(|group| group.name).collect();
+    assert_eq!(names, ["billing", "store"]);
+    assert!(
+        super::groups::group_rename(shop.clone(), " ".to_string(), app.state())
+            .await
+            .is_err()
+    );
+
+    super::groups::group_rename(shop, "billing".to_string(), app.state())
+        .await
+        .expect("merge");
+    let listed = groups().await;
+    assert_eq!(listed.len(), 1, "the renamed group joined billing");
+    let billing = listed[0].id.clone();
+    let connections = super::connections::connection_list(app.state())
+        .await
+        .expect("list");
+    assert!(connections
+        .iter()
+        .all(|row| row.group_id.as_deref() == Some(billing.as_str())));
+
+    super::groups::group_dissolve(billing, app.state())
+        .await
+        .expect("dissolve");
+    assert!(groups().await.is_empty());
+    let connections = super::connections::connection_list(app.state())
+        .await
+        .expect("list");
+    assert_eq!(connections.len(), 2, "dissolving keeps the connections");
+    assert!(connections.iter().all(|row| row.group_id.is_none()));
 }

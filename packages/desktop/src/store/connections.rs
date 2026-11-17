@@ -3,7 +3,7 @@ use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use orm::models::{DbConnection, NewConnectionGroup, NewDbConnection, UpdateDbConnection};
 use orm::schema::{connection_groups, db_connections};
-use shared::DbConnectionRecord;
+use shared::{DbConnectionRecord, Environment};
 use uuid::Uuid;
 
 use super::{internal_error, run_db, DbPool};
@@ -51,6 +51,7 @@ pub async fn connection_save(
                     ssl_mode: record.ssl_mode,
                     path: record.path,
                     read_only: record.read_only,
+                    environment: record.environment.as_str().to_string(),
                     updated_at: now,
                 };
                 let saved = if record.id.is_empty() {
@@ -101,7 +102,7 @@ fn group_id(connection: &mut SqliteConnection, name: &str) -> QueryResult<Option
 }
 
 /// A group exists only while a connection is in it.
-fn drop_empty_groups(connection: &mut SqliteConnection) -> QueryResult<usize> {
+pub(super) fn drop_empty_groups(connection: &mut SqliteConnection) -> QueryResult<usize> {
     diesel::sql_query(
         "DELETE FROM connection_groups WHERE id NOT IN \
          (SELECT group_id FROM db_connections WHERE group_id IS NOT NULL)",
@@ -140,5 +141,6 @@ fn to_record(row: DbConnection) -> DbConnectionRecord {
         ssl_mode: row.ssl_mode,
         path: row.path,
         read_only: row.read_only,
+        environment: Environment::parse(&row.environment),
     }
 }

@@ -21,6 +21,8 @@ pub struct DbConnection {
     pub read_only: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    /// `local`, `development`, `staging` or `production`.
+    pub environment: String,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -47,5 +49,6 @@ pub struct UpdateDbConnection {
     pub ssl_mode: String,
     pub path: String,
     pub read_only: bool,
+    pub environment: String,
     pub updated_at: NaiveDateTime,
 }

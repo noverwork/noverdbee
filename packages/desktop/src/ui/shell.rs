@@ -101,7 +101,7 @@ impl Shell {
         let route = store.route.clone();
         let store_handle = self.store.clone();
         let active = match route {
-            Route::Databases | Route::ConnectionForm(_) => "databases",
+            Route::Databases | Route::ConnectionForm(_) | Route::NewConnectionIn(_) => "databases",
             Route::Settings => "settings",
         };
 
@@ -169,7 +169,9 @@ impl Shell {
 
     fn render_header(&self, cx: &Context<Self>) -> impl IntoElement {
         let (label, icon) = match &self.store.read(cx).route {
-            Route::Databases | Route::ConnectionForm(_) => (t("Databases"), "database"),
+            Route::Databases | Route::ConnectionForm(_) | Route::NewConnectionIn(_) => {
+                (t("Databases"), "database")
+            }
             Route::Settings => (t("Settings"), "settings"),
         };
         h_flex()

@@ -12,6 +12,8 @@ pub enum Route {
     Databases,
     /// Add a connection, or edit the one with this id.
     ConnectionForm(Option<String>),
+    /// Add a connection to the group with this name.
+    NewConnectionIn(String),
     Settings,
 }
 

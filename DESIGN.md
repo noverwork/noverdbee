@@ -144,15 +144,15 @@ components:
 
 **Creative North Star: "Container Stencil"**
 
-Every database connection is a container in a night port. The ground is cold slate, the tab strip is corrugated steel, and each workspace tab is a painted container door carrying its connection group's line colour and a stencilled code (`PRD·orders`). A dropped connection is sealed HELD the way a customs-held box is. The engineer reads environment by colour and code before they read the query, which is what stops a statement meant for staging from running against production.
+Every database connection is a container in a night port. The ground is cold slate, the tab strip is corrugated steel, and each workspace tab is a painted container door carrying its environment's line colour and a stencilled code (`PRD·orders`). A dropped connection is sealed HELD the way a customs-held box is. The engineer reads environment by colour and code before they read the query, which is what stops a statement meant for staging from running against production.
 
-The system is dense, dark, and flat. One monospace face does everything. Every edge is a whole-pixel 1px hairline, every corner is 2px, nothing is blurred, glowing, or lifted by a soft shadow. Colour is rationed: the slate and stencil neutrals carry the chrome, and saturated colour appears only as a group's line colour, the seal of a held or destructive state, or the ochre of a decision that has not been committed yet. The SQL editor sits on pure black ink and is never tinted; data sits on port slate in a plain ruled grid.
+The system is dense, dark, and flat. One monospace face does everything. Every edge is a whole-pixel 1px hairline, every corner is 2px, nothing is blurred, glowing, or lifted by a soft shadow. Colour is rationed: the slate and stencil neutrals carry the chrome, and saturated colour appears only as an environment's line colour, the seal of a held or destructive state, or the ochre of a decision that has not been committed yet. The SQL editor sits on pure black ink and is never tinted; data sits on port slate in a plain ruled grid.
 
 Motion is functional only: short opacity and border transitions on state, and a short flip when tabs reorder. Nothing animates for decoration, which keeps the client feeling as light as its claim.
 
 **Key Characteristics:**
-- Connection identity is a line colour plus a stencilled `GRP·CONN` code in tracked caps.
-- Exactly four line colours plus graphite for ungrouped; no fifth.
+- Connection identity is a line colour plus a stencilled `ENV·CONN` code in tracked caps.
+- Exactly four line colours, one per environment; no fifth.
 - One shape per connection state, readable without colour.
 - 1px hairlines, 2px corners, no soft shadows, no blur, no glass.
 - Pure black editor ink inside slate chrome; data on a ruled slate grid.
@@ -166,8 +166,8 @@ Night-port slate and off-white stencil paint, with four freight line colours and
 - **Stencil White** (stencil): all primary text, the active outline on tabs and rail items, focus rings, the selected-cell outline in grids, and the fill of primary buttons and the HELD seal. It is paint, not pure white; pure white appears only as the primary button's hover.
 
 ### Secondary
-- **Freight Line Colours** (line-rust, line-harbour, line-evergreen, line-ochre): the group signature. A group is an environment (production, staging, development). Groups take the colours in group-name order (sorted by name, index modulo four), so neighbouring groups in the navigator never share a colour until there are more than four groups. Rust, harbour blue, and evergreen carry stencil text; ochre carries dark port text. They fill workspace tabs, the swatch in the status line, and the swatch beside each group heading in the navigator.
-- **Graphite** (line-graphite): the line colour for connections that belong to no group (coded `DB`).
+- **Freight Line Colours** (line-graphite, line-evergreen, line-ochre, line-rust): the environment signature. Every connection names the environment it reaches, and each environment has one fixed colour and code that rise with danger: local is graphite (`LOC`), development evergreen (`DEV`), staging ochre (`STG`), production rust (`PRD`). Graphite, evergreen and rust carry stencil text; ochre carries dark port text. They fill workspace tabs, the swatch in the status line, and the 4x12 swatch before each connection in the navigator. Harbour blue (line-harbour) is held in reserve.
+- **Groups** are folders. They file connections (by product, client, team) and carry no colour or code. A group is made by typing a new name in the connection form, where the existing groups sit under the field as outline chips; it is renamed or ungrouped from its row's menu in the navigator, and it goes away when its last connection leaves.
 
 ### Tertiary
 - **Seal Red** (seal, hover seal-hover): the HELD seal's text, destructive confirm buttons, the edge of a row staged for deletion, and the 60%-alpha border on query-error panels, error toasts, and the disconnected panel. It shares its value with the rust line colour; the meaning comes from context (a seal is a stencil chip with red letters, a line is a fill).
@@ -182,7 +182,7 @@ Night-port slate and off-white stencil paint, with four freight line colours and
 - **Hairline** (hairline): the default 1px edge on panels, chips, fields, inactive tabs, grid rules, and separators. Hover steps it to white/20 or white/25.
 
 ### Named Rules
-**The Four Lines Rule.** Group identity uses exactly the four line colours plus graphite, assigned by group-name order. Never add a fifth line colour or hand-pick one per screen. Line colours mark groups and nothing else: never data types, never syntax, never object kinds.
+**The Four Lines Rule.** Environment identity uses exactly the four line colours, fixed per environment so production looks the same everywhere and always. Never add a fifth line colour, derive one from a name or an order, or hand-pick one per screen. Line colours mark environments and nothing else: never groups, data types, syntax, or object kinds.
 
 **The Inactive Mix Rule.** An inactive tab mixes its line colour 55% into rib (`color-mix(in srgb, <line> 55%, rib)`) with a 1px hairline edge. Never fade the tab with opacity; the stencil text has to keep its contrast.
 
@@ -206,7 +206,7 @@ Night-port slate and off-white stencil paint, with four freight line colours and
 - **Label** (600, 11px, tracking 0.14em, uppercase): stencil codes on tabs, the status line, chips, tooltips, field labels, definition terms, grid column headers, and the `NULL` marker.
 
 ### Named Rules
-**The Stencil Code Rule.** Anything that identifies a container (group code, connection code, HELD) is set in the label style: 11px uppercase tracked 0.14em, joined with a middle dot (`PRD·CONN`). Names of things inside the container (tab titles, tables, columns) are not codes and keep their own case.
+**The Stencil Code Rule.** Anything that identifies a container (environment code, connection code, HELD) is set in the label style: 11px uppercase tracked 0.14em, joined with a middle dot (`PRD·CONN`). Names of things inside the container (tab titles, tables, columns) are not codes and keep their own case.
 
 **The Label Below Rule.** Tracked labels name the thing they sit on (a field, a column, a term). They never float above a heading as an eyebrow.
 
@@ -273,22 +273,22 @@ State shapes, one per state:
 - **Held** (disconnected or failed): the HELD seal.
 
 ### Navigator Tree (signature)
-The manifest. On rail, 24px rows in body-small, 12px of indent per level, a 12px chevron for nodes that open. Group headings carry an 8x12 line-colour swatch, the group name, its stencil code chip, and a count chip. A connection row carries its name and the same state shape a tab uses. Object rows (database, schema, table, view, column) are stencil-dim with a stencil-mute Lucide icon; a column row shows its type at the right in stencil-faint. Hover washes the row white/5; the selected row sits on rib with stencil text. No line colour appears below the group heading.
+The manifest. On rail, 32px rows in body, 12px of indent per level, a 12px chevron for nodes that open. Group headings are folders: a folder icon, the group name, and its connection count in stencil-faint. A connection row carries a 4x12 swatch in its environment's line colour, its name, and the same state shape a tab uses, except that a failed connection shows a seal-red dot instead of the HELD seal, with the reason in its tooltip; the failure also raises an error toast once. Object rows (database, schema, table, view, column) are stencil-dim with a stencil-mute Lucide icon; a column row shows its type at the right in stencil-faint. Hover washes the row white/5; the selected row sits on rib with stencil text. Line colour appears only on connection rows.
 
 ### Data Grid (signature)
-A ruled ledger on port. Header row on rail in label type with a hairline below; a sorted column shows a 10px arrow after its name. Rows are 24px with a hairline between them and between columns; there is no zebra striping. A fixed row-number column sits at the left in stencil-faint. Values are body-small in stencil; numbers align right with tabular figures; `NULL` is the label-style word in stencil-faint. The selected cell has a 1px stencil outline; a selected range adds a white/5 wash. An edited cell takes ochre-text and a 1px ochre edge; a row staged for deletion takes a seal edge and stencil-faint text; a new row takes an ochre edge on the whole row.
+A ruled ledger on port. Header row on rail in label type with a hairline below; a sorted column shows a 10px arrow after its name. The header and rows are 32px with a hairline between them and between columns; there is no zebra striping. A fixed row-number column sits at the left in stencil-faint. Values are body in stencil; numbers align right with tabular figures; `NULL` is the label-style word in stencil-faint. The selected cell has a 1px stencil outline; a selected range adds a white/5 wash. An edited cell takes ochre-text and a 1px ochre edge; a row staged for deletion takes a seal edge and stencil-faint text; a new row takes an ochre edge on the whole row.
 
 ### SQL Editor
 Ink surface with 14px padding and a stencil-faint line-number gutter. Syntax uses the stencil ramp plus one accent: keywords stencil, identifiers and operators stencil-dim, numbers stencil, string literals ochre-text, comments stencil-faint. The current line gets a white/5 wash; the selection is white/15. An error underlines the reported position with a 1px seal rule.
 
 ### Status Line (signature)
-24px rail band: an 8x12 line-colour swatch and the active `GRP·CONN` code in stencil, then the address (`user@host:port/database`, or the file path for SQLite), the state label (seal-tinted when held), `TXN` in ochre-text while a transaction is open, and the last statement's row count and duration. On the right, the open connection count with a held count when any are held.
+24px rail band: an 8x12 line-colour swatch and the active `ENV·CONN` code in stencil, then the address (`user@host:port/database`, or the file path for SQLite), the state label (seal-tinted when held), `TXN` in ochre-text while a transaction is open, and the last statement's row count and duration. On the right, the open connection count with a held count when any are held.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** mark every workspace tab with its group's line colour and `GRP·CONN` stencil code, and repeat both in the status line.
-- **Do** assign line colours from the four-colour set in group-name order, with graphite for ungrouped connections.
+- **Do** mark every workspace tab with its environment's line colour and `ENV·CONN` stencil code, and repeat both in the status line.
+- **Do** take a connection's line colour from its environment only.
 - **Do** mix inactive tab fills 55% into rib and keep a 1px hairline edge on them.
 - **Do** use filled dot for live, ring for waiting, and the HELD seal for dropped or failed.
 - **Do** make destructive confirms solid seal and pending confirms (Save, Commit) solid ochre; make primary actions solid stencil with port text.
@@ -299,7 +299,7 @@ Ink surface with 14px padding and a stencil-faint line-number gutter. Syntax use
 ### Don't:
 - **Don't** use soft shadows, glows, backdrop blur, or glass surfaces anywhere.
 - **Don't** add a fifth line colour or tint a tab with opacity instead of the rib mix.
-- **Don't** use line colours for syntax, data types, or object kinds; they mark groups only.
+- **Don't** use line colours for syntax, data types, or object kinds; they mark environments only.
 - **Don't** put eyebrow labels above headings.
 - **Don't** tint the editor background, stripe grid rows, or use cool grey for secondary text; secondary text is stencil-derived.
 - **Don't** upper-case, track, or reformat cell values or SQL.

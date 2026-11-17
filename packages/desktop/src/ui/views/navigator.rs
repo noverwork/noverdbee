@@ -7,9 +7,11 @@ use std::rc::Rc;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::list::ListItem;
-use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
+use gpui_kit::component::notification::Notification;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::tree::{tree, TreeEntry, TreeEvent, TreeItem, TreeState};
-use gpui_kit::component::{h_flex, v_flex, Sizable as _};
+use gpui_kit::component::{h_flex, v_flex, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use shared::DbConnectionRecord;
@@ -34,6 +36,8 @@ pub enum ConnectionState {
 pub enum NavigatorEvent {
     /// A connection finished opening.
     Connected { connection: String },
+    /// A connection could not be opened.
+    Failed { name: String, error: String },
     /// The user asked for a SQL editor on a connection.
     NewEditor { connection: String },
     /// The user asked to see a table's rows.
@@ -43,14 +47,17 @@ pub enum NavigatorEvent {
 /// What a tree row stands for, by tree item id.
 #[derive(Clone)]
 enum Node {
+    /// A folder of connections; it carries no colour.
     Group {
-        code: SharedString,
+        id: String,
+        name: SharedString,
         count: usize,
-        line: Rgba,
     },
     Connection {
         id: String,
         state: Option<ConnectionState>,
+        /// The environment's line colour.
+        line: Rgba,
     },
     Table {
         connection: String,
@@ -61,8 +68,8 @@ enum Node {
         type_name: SharedString,
         primary_key: bool,
     },
-    /// A line of text under a connection: an error, or "no tables".
-    Note { failed: bool },
+    /// A line of text under a connection: "no tables".
+    Note,
 }
 
 pub struct Navigator {
@@ -135,6 +142,7 @@ impl Navigator {
         self.states.insert(id.clone(), ConnectionState::Connecting);
         self.rebuild(cx);
         let app = self.store.read(cx).app();
+        let name = record.name.clone();
         cx.spawn(async move |this, cx| {
             let loaded = backend(async move {
                 let session = app.state::<SessionManager>().connect(&record).await?;
@@ -149,7 +157,13 @@ impl Navigator {
                         });
                         ConnectionState::Live(Rc::new(tables))
                     }
-                    Err(error) => ConnectionState::Failed(error.into()),
+                    Err(error) => {
+                        cx.emit(NavigatorEvent::Failed {
+                            name,
+                            error: error.clone(),
+                        });
+                        ConnectionState::Failed(error.into())
+                    }
                 };
                 this.states.insert(id, state);
                 this.rebuild(cx);
@@ -200,6 +214,76 @@ impl Navigator {
         );
     }
 
+    /// Asks for a group's new name, then renames it.
+    fn rename_group(
+        &mut self,
+        id: String,
+        name: SharedString,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(name));
+        input.update(cx, |input, cx| input.focus(window, cx));
+        let navigator = cx.weak_entity();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let (navigator, input, id) = (navigator.clone(), input.clone(), id.clone());
+            alert
+                .title(t("Rename group"))
+                .description(Input::new(&input))
+                .confirm()
+                .ok_text(t("Rename"))
+                .cancel_text(t("Cancel"))
+                .on_ok(move |_, window, cx| {
+                    let name = input.read(cx).value().trim().to_string();
+                    if name.is_empty() {
+                        return false;
+                    }
+                    let id = id.clone();
+                    let _ = navigator.update(cx, |this, cx| {
+                        let app = this.store.read(cx).app();
+                        this.change_groups(
+                            async move {
+                                crate::store::groups::group_rename(id, name, app.state()).await
+                            },
+                            window,
+                            cx,
+                        )
+                    });
+                    true
+                })
+        });
+    }
+
+    /// Takes every connection out of a group.
+    fn dissolve_group(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let app = self.store.read(cx).app();
+        self.change_groups(
+            async move { crate::store::groups::group_dissolve(id, app.state()).await },
+            window,
+            cx,
+        );
+    }
+
+    /// Runs a group change in the backend, then reloads; a failure is a toast.
+    fn change_groups(
+        &mut self,
+        change: impl std::future::Future<Output = Result<(), String>> + Send + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let store = self.store.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            let changed = backend(change).await;
+            let _ = cx.update(|window, cx| {
+                if let Err(error) = changed {
+                    window.push_notification(Notification::error(error), cx);
+                }
+                store.update(cx, |store, cx| store.refresh(cx));
+            });
+        })
+        .detach();
+    }
+
     /// Drops the state of connections that were edited or deleted, then redraws.
     fn reconcile(&mut self, cx: &mut Context<Self>) {
         let app = self.store.read(cx).app();
@@ -240,9 +324,9 @@ impl Navigator {
             nodes.insert(
                 id.clone(),
                 Node::Group {
-                    code: stencil::group_prefix(&group.name).into(),
+                    id: group.id.clone(),
+                    name: group.name.clone().into(),
                     count: members.len(),
-                    line: stencil::line_color(&group.id, &store.groups).0,
                 },
             );
             let children: Vec<TreeItem> = members
@@ -270,17 +354,12 @@ impl Navigator {
         let id = SharedString::from(format!("connection:{}", connection.id));
         let state = self.states.get(&connection.id).cloned();
         let mut children = Vec::new();
-        let mut note = |text: SharedString, failed: bool, children: &mut Vec<TreeItem>| {
-            let note_id = SharedString::from(format!("note:{}", connection.id));
-            nodes.insert(note_id.clone(), Node::Note { failed });
-            children.push(TreeItem::new(note_id, text));
-        };
-        match &state {
-            Some(ConnectionState::Failed(error)) => note(error.clone(), true, &mut children),
-            Some(ConnectionState::Live(tables)) if tables.is_empty() => {
-                note(t("No tables"), false, &mut children)
+        if let Some(ConnectionState::Live(tables)) = &state {
+            if tables.is_empty() {
+                let note_id = SharedString::from(format!("note:{}", connection.id));
+                nodes.insert(note_id.clone(), Node::Note);
+                children.push(TreeItem::new(note_id, t("No tables")));
             }
-            _ => {}
         }
         if let Some(ConnectionState::Live(tables)) = &state {
             for table in tables.iter() {
@@ -295,6 +374,7 @@ impl Navigator {
             Node::Connection {
                 id: connection.id.clone(),
                 state,
+                line: stencil::line_color(connection.environment).0,
             },
         );
         TreeItem::new(id.clone(), connection.name.clone())
@@ -329,6 +409,42 @@ impl Navigator {
                     })),
             )
     }
+}
+
+/// The menu of a group row: add a connection to it, rename it, or dissolve it.
+fn group_menu(
+    menu: PopupMenu,
+    navigator: WeakEntity<Navigator>,
+    store: Entity<Store>,
+    id: &str,
+    name: &SharedString,
+) -> PopupMenu {
+    let new_connection = {
+        let name = name.to_string();
+        PopupMenuItem::new(t("New connection here")).on_click(move |_, _, cx| {
+            store.update(cx, |store, cx| {
+                store.navigate(Route::NewConnectionIn(name.clone()), cx)
+            });
+        })
+    };
+    let rename = {
+        let (navigator, id, name) = (navigator.clone(), id.to_string(), name.clone());
+        PopupMenuItem::new(t("Rename")).on_click(move |_, window, cx| {
+            let _ = navigator.update(cx, |this, cx| {
+                this.rename_group(id.clone(), name.clone(), window, cx)
+            });
+        })
+    };
+    let dissolve = {
+        let id = id.to_string();
+        PopupMenuItem::new(t("Ungroup")).on_click(move |_, window, cx| {
+            let _ = navigator.update(cx, |this, cx| this.dissolve_group(id.clone(), window, cx));
+        })
+    };
+    menu.item(new_connection)
+        .separator()
+        .item(rename)
+        .item(dissolve)
 }
 
 fn table_item(
@@ -391,19 +507,6 @@ pub fn state_shape(state: Option<&ConnectionState>, color: Rgba) -> AnyElement {
     }
 }
 
-fn chip(text: impl IntoElement) -> Div {
-    div()
-        .flex_shrink_0()
-        .px_1p5()
-        .rounded(theme::RADIUS)
-        .border_1()
-        .border_color(theme::hairline())
-        .bg(theme::RIB)
-        .text_size(px(11.))
-        .text_color(theme::STENCIL_DIM)
-        .child(text)
-}
-
 fn render_row(entry: &TreeEntry, node: Option<&Node>, selected: bool) -> ListItem {
     let item = entry.item();
     let chevron = if !entry.is_folder() {
@@ -440,15 +543,34 @@ fn render_row(entry: &TreeEntry, node: Option<&Node>, selected: bool) -> ListIte
         .pl(px(12. * entry.depth() as f32))
         .child(chevron);
     let row = match node {
-        Some(Node::Group { code, count, line }) => row
-            .child(div().w_2().h_3().flex_shrink_0().bg(*line))
+        Some(Node::Group { count, .. }) => row
+            .child(icon("folder"))
             .child(label.text_color(theme::STENCIL))
-            .child(chip(code.clone()))
-            .child(chip(count.to_string()).text_color(theme::STENCIL_MUTE)),
-        Some(Node::Connection { state, .. }) => row
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .text_color(theme::STENCIL_FAINT)
+                    .child(count.to_string()),
+            ),
+        Some(Node::Connection { id, state, line }) => row
+            .child(div().w_1().h_3().flex_shrink_0().bg(*line))
             .child(icon("database"))
             .child(label.text_color(theme::STENCIL))
-            .child(state_shape(state.as_ref(), theme::STENCIL)),
+            .child(match state {
+                // A seal dot; the reason waits in its tooltip.
+                Some(ConnectionState::Failed(error)) => {
+                    let error = error.clone();
+                    div()
+                        .id(SharedString::from(format!("failed:{id}")))
+                        .size_2()
+                        .flex_shrink_0()
+                        .rounded_full()
+                        .bg(theme::SEAL)
+                        .tooltip(move |window, cx| Tooltip::new(error.clone()).build(window, cx))
+                        .into_any_element()
+                }
+                _ => state_shape(state.as_ref(), theme::STENCIL),
+            }),
         Some(Node::Table { kind, .. }) => row
             .child(icon(match kind {
                 ObjectKind::Table => "table-2",
@@ -471,19 +593,15 @@ fn render_row(entry: &TreeEntry, node: Option<&Node>, selected: bool) -> ListIte
                     .text_color(theme::STENCIL_FAINT)
                     .child(type_name.to_lowercase()),
             ),
-        Some(Node::Note { failed }) => row.child(label.text_color(if *failed {
-            theme::AMBER_TEXT
-        } else {
-            theme::STENCIL_FAINT
-        })),
+        Some(Node::Note) => row.child(label.text_color(theme::STENCIL_FAINT)),
         None => row.child(label),
     };
 
     ListItem::new(item.id.clone())
-        .h_6()
+        .h_8()
         .px_2()
         .py_0()
-        .text_xs()
+        .text_sm()
         .text_color(theme::STENCIL_DIM)
         .when(selected, |item| item.bg(theme::RIB))
         .child(row)
@@ -500,7 +618,7 @@ impl Render for Navigator {
         let body = if empty {
             div()
                 .p_4()
-                .text_xs()
+                .text_sm()
                 .text_color(theme::STENCIL_MUTE)
                 .child(t("No connections yet"))
                 .into_any_element()
@@ -511,7 +629,7 @@ impl Render for Navigator {
                 let navigator = navigator.clone();
                 match node.cloned() {
                     // A click opens a connection that is not open yet.
-                    Some(Node::Connection { id, state })
+                    Some(Node::Connection { id, state, .. })
                         if !matches!(
                             state,
                             Some(ConnectionState::Live(_) | ConnectionState::Connecting)
@@ -538,10 +656,15 @@ impl Render for Navigator {
                 }
             })
             .context_menu(move |_, entry, menu, _, cx| {
-                let Some(Node::Connection { id, state }) = menu_nodes.get(&entry.item().id) else {
+                let Some(navigator) = menu_navigator.upgrade() else {
                     return menu;
                 };
-                let Some(navigator) = menu_navigator.upgrade() else {
+                if let Some(Node::Group { id, name, .. }) = menu_nodes.get(&entry.item().id) {
+                    let store = navigator.read(cx).store.clone();
+                    return group_menu(menu, navigator.downgrade(), store, id, name);
+                }
+                let Some(Node::Connection { id, state, .. }) = menu_nodes.get(&entry.item().id)
+                else {
                     return menu;
                 };
                 let store = navigator.read(cx).store.clone();

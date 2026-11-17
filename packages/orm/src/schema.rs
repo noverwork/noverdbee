@@ -25,6 +25,7 @@ diesel::table! {
         read_only -> Bool,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+        environment -> Text,
     }
 }
 

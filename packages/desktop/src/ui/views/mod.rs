@@ -4,6 +4,7 @@ pub mod common;
 pub mod db_connection_form;
 pub mod navigator;
 pub mod result_grid;
+pub mod selection;
 pub mod settings;
 pub mod sql_editor;
 pub mod table_view;
@@ -21,7 +22,12 @@ pub fn build(route: &Route, window: &mut Window, cx: &mut App) -> AnyView {
         Route::Databases => cx.new(|cx| workspace::Workspace::new(window, cx)).into(),
         Route::ConnectionForm(id) => {
             let id = id.clone();
-            cx.new(|cx| db_connection_form::DbConnectionForm::new(id, window, cx))
+            cx.new(|cx| db_connection_form::DbConnectionForm::new(id, None, window, cx))
+                .into()
+        }
+        Route::NewConnectionIn(group) => {
+            let group = Some(group.clone());
+            cx.new(|cx| db_connection_form::DbConnectionForm::new(None, group, window, cx))
                 .into()
         }
         Route::Settings => cx.new(|cx| settings::SettingsView::new(window, cx)).into(),

@@ -233,8 +233,24 @@ fn mark_numeric(result: &mut ResultSet) {
 fn describe(error: &tokio_postgres::Error) -> String {
     match error.as_db_error() {
         Some(db_error) => db_error.message().to_string(),
-        None => error.to_string(),
+        None => with_causes(error),
     }
+}
+
+/// `error` and each error that caused it, joined with `: `. The driver's own
+/// text is only the kind ("error connecting to server"); the reason, such as
+/// a refused connection or a failed TLS handshake, is in its sources.
+fn with_causes(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let cause_text = cause.to_string();
+        if !text.contains(&cause_text) {
+            text = format!("{text}: {cause_text}");
+        }
+        source = cause.source();
+    }
+    text
 }
 
 /// Where in `sql` the server says the error is, as a byte offset. The server
@@ -297,4 +313,34 @@ pub fn structure_queries(table: &TableRef) -> Vec<(&'static str, String)> {
             ),
         ),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::with_causes;
+
+    #[derive(Debug)]
+    struct Wrapper(std::io::Error);
+
+    impl std::fmt::Display for Wrapper {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("error connecting to server")
+        }
+    }
+
+    impl std::error::Error for Wrapper {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    #[test]
+    fn a_connect_error_names_its_cause() {
+        let refused =
+            std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "Connection refused");
+        assert_eq!(
+            with_causes(&Wrapper(refused)),
+            "error connecting to server: Connection refused"
+        );
+    }
 }
