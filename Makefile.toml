@@ -1,0 +1,152 @@
+# cargo-make configuration for truley-claw
+# Install: cargo install cargo-make
+# Usage: cargo make <task>
+
+[config]
+min_version = "0.37.0"
+
+# --- Default Task ---
+[tasks.default]
+description = "Show available tasks"
+run_task = { name = "list-tasks" }
+
+[tasks.list-tasks]
+description = "List all available tasks"
+script = '''
+#!/usr/bin/env bash
+echo "Available tasks:"
+echo "  cargo make build          - Build the project"
+echo "  cargo make test           - Run tests"
+echo "  cargo make lint           - Run clippy (deny warnings)"
+echo "  cargo make fmt            - Format code"
+echo "  cargo make check          - Type check"
+echo "  cargo make ci             - Full CI pipeline"
+echo "  cargo make clean          - Clean build artifacts"
+echo "  cargo make dev            - Run the desktop app"
+echo "  cargo make screenshots    - Render every page offscreen to target/screenshots"
+echo "  cargo make bundle         - Package the desktop app for this platform"
+echo "  cargo make ms:start       - Start MS service"
+echo "  cargo make ms:stop        - Stop MS service"
+echo "  cargo make ms:restart     - Restart MS service"
+echo "  cargo make ms:reset       - Reset MS service (delete data)"
+'''
+
+# --- Build ---
+[tasks.build]
+description = "Build the project"
+workspace = false
+command = "cargo"
+args = ["build"]
+
+[tasks.build-release]
+description = "Build in release mode"
+workspace = false
+command = "cargo"
+args = ["build", "--release"]
+
+# --- Test ---
+[tasks.test]
+description = "Run tests"
+workspace = false
+command = "cargo"
+args = ["test"]
+
+[tasks.test-all]
+description = "Run all workspace tests with all features"
+workspace = false
+command = "cargo"
+args = ["test", "--workspace", "--all-features"]
+
+[tasks.test-lib]
+description = "Run library tests only"
+workspace = false
+command = "cargo"
+args = ["test", "--lib"]
+
+# --- Lint & Format ---
+[tasks.lint]
+description = "Run clippy with strict settings"
+workspace = false
+command = "cargo"
+args = ["clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"]
+
+[tasks.fmt]
+description = "Format code with rustfmt"
+workspace = false
+command = "cargo"
+args = ["fmt"]
+
+[tasks.fmt-check]
+description = "Check code formatting"
+workspace = false
+command = "cargo"
+args = ["fmt", "--check"]
+
+[tasks.check]
+description = "Type check without building"
+workspace = false
+command = "cargo"
+args = ["check"]
+
+# --- CI Pipeline ---
+[tasks.ci]
+description = "Full CI pipeline: lint, format check, and test"
+run_task = { name = ["lint", "fmt-check", "test-all"] }
+
+# --- Run ---
+[tasks.dev]
+description = "Run the desktop app"
+workspace = false
+command = "cargo"
+args = ["run", "-p", "desktop"]
+
+[tasks.screenshots]
+description = "Render every page offscreen to target/screenshots"
+workspace = false
+command = "cargo"
+args = ["test", "-p", "desktop", "--test", "screenshots"]
+
+[tasks.bundle]
+description = "Package the desktop app for this platform"
+workspace = false
+install_crate = "cargo-packager"
+cwd = "packages/desktop"
+command = "cargo"
+args = ["packager", "--release"]
+
+# --- Clean ---
+[tasks.clean]
+description = "Clean build artifacts"
+command = "cargo"
+args = ["clean"]
+
+# --- Custom Scripts ---
+[tasks."ms:start"]
+description = "Start MS service"
+workspace = false
+script = '''
+#!/usr/bin/env bash
+./scripts/start-ms.sh
+'''
+
+[tasks."ms:stop"]
+description = "Stop MS service"
+workspace = false
+script = '''
+#!/usr/bin/env bash
+./scripts/stop-ms.sh
+'''
+
+[tasks."ms:restart"]
+description = "Restart MS service"
+workspace = false
+run_task = { name = ["ms:stop", "ms:start"] }
+
+[tasks."ms:reset"]
+description = "Reset MS service (stop with delete + start)"
+workspace = false
+script = '''
+#!/usr/bin/env bash
+./scripts/stop-ms.sh --delete
+./scripts/start-ms.sh
+'''

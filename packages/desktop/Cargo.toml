@@ -1,0 +1,70 @@
+[package]
+name = "desktop"
+version = "0.0.0"
+description = "Database client"
+authors = ["you"]
+edition = "2021"
+license = "MIT"
+default-run = "noverdbee"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "desktop_lib"
+
+[[bin]]
+name = "noverdbee"
+path = "src/main.rs"
+
+# Bundles: `cargo packager --release` (cargo install cargo-packager).
+[package.metadata.packager]
+product-name = "noverdbee"
+identifier = "com.noverwork.noverdbee"
+before-packaging-command = "cargo build --release -p desktop"
+out-dir = "../../target/release/bundle"
+icons = [
+    "icons/32x32.png",
+    "icons/128x128.png",
+    "icons/128x128@2x.png",
+    "icons/icon.icns",
+    "icons/icon.ico",
+]
+
+[package.metadata.packager.macos]
+# Ad-hoc signed, not notarized; install.sh clears the quarantine flag.
+signing-identity = "-"
+
+[dependencies]
+gpui-kit = "0.9.1"
+dirs = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+shared = { path = "../shared" }
+orm = { path = "../orm" }
+diesel = { version = "2.3", features = ["sqlite", "chrono", "r2d2", "returning_clauses_for_sqlite_3_35"] }
+diesel_migrations = { version = "2.3", features = ["sqlite"] }
+# Bundled so Windows/Linux builds do not depend on a system sqlite, and so
+# RETURNING (3.35) and VACUUM INTO (3.27) are always available.
+# 0.38+ bundles SQLite >= 3.51.2: 3.51.0/3.51.1 deadlock in the unix VFS when
+# one pool connection closes while another opens (save spins forever).
+libsqlite3-sys = { version = "0.38", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.13", features = ["json"] }
+base64 = "0.22"
+minisign-verify = "0.2"
+
+[dev-dependencies]
+# Offscreen rendering for the screenshot test. Enabled on the GPUI crates
+# directly: gpui-kit's own `test-support` drags in gpui-fast, whose pins clash
+# with other dependencies in this workspace.
+gpui-pre = { version = "=0.3.12", features = ["test-support"] }
+gpui-pre-platform = { version = "=0.3.12", features = ["test-support"] }
+tempfile = "3"
+
+[[test]]
+name = "screenshots"
+harness = false

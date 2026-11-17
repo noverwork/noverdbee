@@ -1,0 +1,10 @@
+[workspace]
+members = ["packages/desktop", "packages/orm", "packages/shared", "packages/update-signer"]
+resolver = "2"
+
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "packed"
+
+[profile.dev.package."*"]
+debug = false

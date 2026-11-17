@@ -1,0 +1,145 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: Build - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact_name: noverdbee-macos-release
+            artifact_paths: |
+              target/release/bundle/*.dmg
+              target/release/bundle/noverdbee.app.tar.gz
+          - os: windows-latest
+            artifact_name: noverdbee-windows-release
+            artifact_paths: |
+              target/release/bundle/*.exe
+          - os: ubuntu-22.04
+            artifact_name: noverdbee-linux-release
+            artifact_paths: |
+              target/release/bundle/*.AppImage
+              target/release/bundle/*.deb
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # The app compares this version with the latest release to offer updates.
+      - name: Inject version from tag
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          perl -0pi -e "s/^version = \".*?\"/version = \"$version\"/m" packages/desktop/Cargo.toml
+          grep -m1 '^version' packages/desktop/Cargo.toml
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev libdbus-1-dev \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libfontconfig1-dev libfreetype-dev libvulkan-dev file
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked
+
+      - name: Package
+        working-directory: packages/desktop
+        run: cargo packager --release
+
+      # install.sh downloads this archive.
+      - name: Archive the macOS app
+        if: runner.os == 'macOS'
+        run: tar -czf target/release/bundle/noverdbee.app.tar.gz -C target/release/bundle noverdbee.app
+
+      - name: Upload release build artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_paths }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+
+      # Same key and format as the old Tauri updater, so Tauri builds can update too.
+      - name: Sign updater files
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          cargo run --quiet --release -p update-signer -- \
+            dist/noverdbee.app.tar.gz dist/*-setup.exe dist/*.AppImage
+
+      - name: Generate updater manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          node <<'JS'
+          const fs = require('fs');
+          const path = require('path');
+
+          const files = fs.readdirSync('dist').map((file) => path.join('dist', file));
+          const find = (suffix) => {
+            const file = files.find((file) => file.endsWith(suffix));
+            if (!file) throw new Error(`missing *${suffix}`);
+            return file;
+          };
+          const tag = process.env.RELEASE_TAG;
+          const version = tag.replace(/^v/, '');
+          const baseUrl = `https://github.com/${process.env.REPOSITORY}/releases/download/${tag}`;
+          const platform = (file) => ({
+            signature: fs.readFileSync(`${file}.sig`, 'utf8').trim(),
+            url: `${baseUrl}/${path.basename(file)}`,
+          });
+
+          const manifest = {
+            version,
+            notes: `Noverdbee ${version}`,
+            pub_date: new Date().toISOString(),
+            platforms: {
+              'darwin-aarch64': platform(find('.app.tar.gz')),
+              'windows-x86_64': platform(find('-setup.exe')),
+              'linux-x86_64': platform(find('.AppImage')),
+            },
+          };
+          fs.writeFileSync('dist/latest.json', `${JSON.stringify(manifest, null, 2)}\n`);
+          JS
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Noverdbee ${{ github.ref_name }}
+          generate_release_notes: true
+          files: dist/**
+          fail_on_unmatched_files: true
+          overwrite_files: true

@@ -1,0 +1,381 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-17T00:00:00Z",
+  "title": "Design System: Noverdbee",
+  "extensions": {
+    "colorMeta": {
+      "stencil": {
+        "role": "primary",
+        "displayName": "Stencil White",
+        "canonical": "#e8e4d8",
+        "tonalRamp": [
+          "#2b2a26",
+          "#4a4842",
+          "#6a6862",
+          "#82807b",
+          "#9f9d96",
+          "#c1beb5",
+          "#e8e4d8",
+          "#f6f4ee"
+        ]
+      },
+      "stencil-dim": {
+        "role": "neutral",
+        "displayName": "Stencil Dim",
+        "canonical": "#c1beb5"
+      },
+      "stencil-mute": {
+        "role": "neutral",
+        "displayName": "Stencil Mute",
+        "canonical": "#9f9d96"
+      },
+      "stencil-faint": {
+        "role": "neutral",
+        "displayName": "Stencil Faint",
+        "canonical": "#82807b"
+      },
+      "port": {
+        "role": "neutral",
+        "displayName": "Port Slate",
+        "canonical": "#101317",
+        "tonalRamp": [
+          "#000000",
+          "#0b0e11",
+          "#101317",
+          "#161a1f",
+          "#1a1f25",
+          "#2a2f36",
+          "#3d434b",
+          "#5a6069"
+        ]
+      },
+      "rail": {
+        "role": "neutral",
+        "displayName": "Rail Black",
+        "canonical": "#0b0e11"
+      },
+      "rib": {
+        "role": "neutral",
+        "displayName": "Rib Steel",
+        "canonical": "#1a1f25"
+      },
+      "rib-groove": {
+        "role": "neutral",
+        "displayName": "Rib Groove",
+        "canonical": "#161a1f"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#000000"
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "rgb(255 255 255 / 0.1)"
+      },
+      "seal": {
+        "role": "tertiary",
+        "displayName": "Seal Red",
+        "canonical": "#a33b28",
+        "tonalRamp": [
+          "#2a0f0a",
+          "#4a1a12",
+          "#6e271b",
+          "#a33b28",
+          "#b4432f",
+          "#cf6a55",
+          "#e59d8e",
+          "#f6d6cf"
+        ]
+      },
+      "seal-hover": {
+        "role": "tertiary",
+        "displayName": "Seal Red Hover",
+        "canonical": "#b4432f"
+      },
+      "line-rust": {
+        "role": "secondary",
+        "displayName": "Rust Line",
+        "canonical": "#a33b28"
+      },
+      "line-harbour": {
+        "role": "secondary",
+        "displayName": "Harbour Blue Line",
+        "canonical": "#2a648f",
+        "tonalRamp": [
+          "#0b1a26",
+          "#123047",
+          "#1c4a6c",
+          "#2a648f",
+          "#3f7fad",
+          "#6ea2c8",
+          "#a6c8e1",
+          "#dbe9f3"
+        ]
+      },
+      "line-evergreen": {
+        "role": "secondary",
+        "displayName": "Evergreen Line",
+        "canonical": "#336a41",
+        "tonalRamp": [
+          "#0c1a10",
+          "#16301d",
+          "#234d2e",
+          "#336a41",
+          "#4a8659",
+          "#75a682",
+          "#a9c9b0",
+          "#dcebdf"
+        ]
+      },
+      "line-ochre": {
+        "role": "secondary",
+        "displayName": "Pending Ochre Line",
+        "canonical": "#c9952e",
+        "tonalRamp": [
+          "#2e210a",
+          "#4f3912",
+          "#7a581b",
+          "#a77925",
+          "#c9952e",
+          "#d6a443",
+          "#e6c27a",
+          "#f5e6c4"
+        ]
+      },
+      "line-ochre-hover": {
+        "role": "secondary",
+        "displayName": "Ochre Hover",
+        "canonical": "#d6a443"
+      },
+      "ochre-text": {
+        "role": "secondary",
+        "displayName": "Ochre Pending Text",
+        "canonical": "#e6c27a"
+      },
+      "line-graphite": {
+        "role": "neutral",
+        "displayName": "Graphite Line",
+        "canonical": "#2a2f36"
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Full-page view titles."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Dialog and overlay titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "SQL in the editor, descriptions, list rows, field text."
+      },
+      "body-small": {
+        "displayName": "Body Small",
+        "purpose": "Tree rows, grid cells, column types."
+      },
+      "label": {
+        "displayName": "Stencil Label",
+        "purpose": "Stencil codes, status line, chips, tooltips, field labels, grid column headers, the NULL marker."
+      }
+    },
+    "shadows": [
+      {
+        "name": "editor-frame-edge",
+        "value": "inset 0 1px 0 rgb(255 255 255 / 0.06)",
+        "purpose": "1px top hairline on the editor frame; an edge, not elevation. The system has no drop shadows."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-transition",
+        "value": "120ms",
+        "purpose": "Tab border/background and close-control opacity; removed under prefers-reduced-motion."
+      },
+      {
+        "name": "tab-reorder-flip",
+        "value": "140ms cubicOut",
+        "purpose": "Tab reorder after drag."
+      },
+      {
+        "name": "tooltip-fade",
+        "value": "150ms",
+        "purpose": "Rail tooltips and tab-strip opacity while a full-page view is open."
+      },
+      {
+        "name": "toast-enter",
+        "value": "180ms ease-out",
+        "purpose": "Toast slide-in."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Default action: solid stencil with port text.",
+      "html": "<button class=\"ds-btn-primary\">New Connection</button>",
+      "css": ".ds-btn-primary{font-family:'Sarasa Term TC SemiBold',Menlo,Monaco,'Courier New',monospace;font-weight:600;font-size:14px;height:32px;padding:0 16px;border:1px solid transparent;border-radius:2px;background:var(--color-stencil,#e8e4d8);color:var(--color-port,#101317);cursor:pointer;transition:background-color 120ms}.ds-btn-primary:hover{background:#ffffff}.ds-btn-primary:focus-visible{outline:1px solid #e8e4d8;outline-offset:2px}"
+    },
+    {
+      "name": "Destructive Confirm",
+      "kind": "button",
+      "refersTo": "button-destructive",
+      "description": "Delete confirm: solid seal.",
+      "html": "<button class=\"ds-btn-seal\">Delete</button>",
+      "css": ".ds-btn-seal{font-family:'Sarasa Term TC SemiBold',Menlo,Monaco,'Courier New',monospace;font-weight:600;font-size:14px;height:32px;padding:0 16px;border:0;border-radius:2px;background:#a33b28;color:#e8e4d8;cursor:pointer;transition:background-color 120ms}.ds-btn-seal:hover{background:#b4432f}.ds-btn-seal:focus-visible{outline:1px solid #e8e4d8;outline-offset:2px}"
+    },
+    {
+      "name": "Pending Confirm",
+      "kind": "button",
+      "refersTo": "button-pending",
+      "description": "Save staged edits, commit a transaction, or overwrite: solid ochre with dark text.",
+      "html": "<button class=\"ds-btn-pending\">Save 3 changes</button>",
+      "css": ".ds-btn-pending{font-family:'Sarasa Term TC SemiBold',Menlo,Monaco,'Courier New',monospace;font-weight:600;font-size:14px;min-height:32px;padding:4px 16px;border:0;border-radius:2px;background:#c9952e;color:#101317;cursor:pointer;transition:background-color 120ms}.ds-btn-pending:hover{background:#d6a443}.ds-btn-pending:focus-visible{outline:1px solid #e8e4d8;outline-offset:2px}"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Cancel and secondary actions.",
+      "html": "<button class=\"ds-btn-outline\">Cancel</button>",
+      "css": ".ds-btn-outline{font-family:'Sarasa Term TC SemiBold',Menlo,Monaco,'Courier New',monospace;font-weight:600;font-size:14px;height:32px;padding:0 16px;border:1px solid rgb(255 255 255 / 0.1);border-radius:2px;background:transparent;color:#e8e4d8;cursor:pointer;transition:border-color 120ms,background-color 120ms}.ds-btn-outline:hover{border-color:rgb(255 255 255 / 0.2);background:rgb(255 255 255 / 0.05)}.ds-btn-outline:focus-visible{outline:1px solid #e8e4d8;outline-offset:2px}"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "44px rail field; focus turns the edge stencil.",
+      "html": "<input class=\"ds-field\" placeholder=\"database name\" />",
+      "css": ".ds-field{font-family:'Sarasa Term TC SemiBold',Menlo,Monaco,'Courier New',monospace;font-weight:600;font-size:14px;height:44px;width:260px;padding:0 12px;border:1px solid rgb(255 255 255 / 0.1);border-radius:2px;background:#0b0e11;color:#e8e4d8;outline:none}.ds-field::placeholder{color:#82807b}.ds-field:focus-visible{border-color:#e8e4d8}"
+    },
+    {
+      "name": "Workspace Tabs",
+      "kind": "nav",
+      "refersTo": "workspace-tab-active",
+      "description": "Container-end tabs on the corrugated strip: connection code then title, active full fill with stencil outline, inactive 55% mix into rib, one state shape each.",
+      "html": "<div class=\"ds-strip\"><div class=\"ds-tab ds-tab-active\" style=\"background:#2a648f\"><span class=\"ds-code\">STG·orders</span><span class=\"ds-title\">users</span><span class=\"ds-dot\"></span></div><div class=\"ds-tab\" style=\"background:color-mix(in srgb,#336a41 55%,#1a1f25)\"><span class=\"ds-code\">DEV·app</span><span class=\"ds-title\">Query 2</span><span class=\"ds-ring\"></span></div><div class=\"ds-tab\" style=\"background:color-mix(in srgb,#a33b28 55%,#1a1f25)\"><span class=\"ds-code\">PRD·orders</span><span class=\"ds-title\">Query 1</span><span class=\"ds-held\">HELD</span></div></div>",
+      "css": ".ds-strip{display:flex;gap:4px;align-items:center;height:36px;padding:0 6px;background:repeating-linear-gradient(90deg,#1a1f25 0 7px,#161a1f 7px 8px)}.ds-tab{font-family:'Sarasa Term TC SemiBold',Menlo,Monaco,'Courier New',monospace;font-weight:600;display:flex;align-items:center;gap:8px;height:28px;width:200px;padding:0 10px;border:1px solid rgb(255 255 255 / 0.1);border-radius:2px;color:#e8e4d8;cursor:pointer;transition:border-color 120ms,background-color 120ms}.ds-tab:hover{border-color:rgb(255 255 255 / 0.25)}.ds-tab-active{border-color:#e8e4d8}.ds-tab:focus-visible{outline:1px solid #e8e4d8}.ds-code{white-space:nowrap;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;}.ds-dot{width:8px;height:8px;border-radius:9999px;background:currentColor}.ds-ring{width:8px;height:8px;border-radius:9999px;border:2px solid currentColor;box-sizing:border-box}.ds-held{background:#e8e4d8;color:#a33b28;padding:0 4px;line-height:16px;font-size:11px;letter-spacing:0.14em}.ds-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}"
+    },
+    {
+      "name": "Stencil Chip",
+      "kind": "chip",
+      "refersTo": "stencil-chip",
+      "description": "Group code and count chips.",
+      "html": "<span class=\"ds-chip\">PRD</span> <span class=\"ds-chip ds-chip-count\">12</span>",
+      "css": ".ds-chip{font-family:'Sarasa Term TC SemiBold',Menlo,Monaco,'Courier New',monospace;font-weight:600;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;display:inline-block;padding:0 6px;border:1px solid rgb(255 255 255 / 0.1);border-radius:2px;background:#1a1f25;color:#c1beb5}.ds-chip-count{text-transform:none;letter-spacing:0;color:#9f9d96}"
+    },
+    {
+      "name": "Data Grid",
+      "kind": "custom",
+      "refersTo": "grid-cell",
+      "description": "Ruled ledger on port: label-type header on rail, 24px rows, right-aligned numbers, NULL marker, ochre edited cell.",
+      "html": "<table class=\"ds-grid\"><thead><tr><th>#</th><th>id</th><th>name</th><th>deleted_at</th></tr></thead><tbody><tr><td class=\"ds-grid-n\">1</td><td class=\"ds-grid-num\">1042</td><td>ann</td><td><span class=\"ds-grid-null\">NULL</span></td></tr><tr><td class=\"ds-grid-n\">2</td><td class=\"ds-grid-num\">1043</td><td class=\"ds-grid-edited\">bo</td><td>2026-01-02</td></tr></tbody></table>",
+      "css": ".ds-grid{font-family:'Sarasa Term TC SemiBold',Menlo,Monaco,'Courier New',monospace;font-weight:600;font-size:12px;border-collapse:collapse;background:#101317;color:#e8e4d8}.ds-grid th,.ds-grid td{height:24px;padding:0 8px;border:1px solid rgb(255 255 255 / 0.1);text-align:left;white-space:nowrap}.ds-grid th{background:#0b0e11;color:#9f9d96;font-size:11px;letter-spacing:0.14em;text-transform:uppercase}.ds-grid-n{color:#82807b;text-align:right}.ds-grid-num{text-align:right;font-variant-numeric:tabular-nums}.ds-grid-null{color:#82807b;font-size:11px;letter-spacing:0.14em}.ds-grid-edited{color:#e6c27a;outline:1px solid #c9952e;outline-offset:-1px}.ds-grid td:hover{background:rgb(255 255 255 / 0.05)}"
+    },
+    {
+      "name": "Status Line",
+      "kind": "custom",
+      "refersTo": "status-line",
+      "description": "24px footer: line swatch, active code, address, state, transaction, last result, counts.",
+      "html": "<footer class=\"ds-status\"><span class=\"ds-status-code\"><span class=\"ds-swatch\"></span>PRD·orders</span><span>app@10.0.4.12:5432/orders</span><span>Connected</span><span class=\"ds-status-txn\">TXN</span><span>120 rows · 34 ms</span><span class=\"ds-status-count\">4 open · 1 held</span></footer>",
+      "css": ".ds-status{font-family:'Sarasa Term TC SemiBold',Menlo,Monaco,'Courier New',monospace;font-weight:600;display:flex;align-items:center;gap:20px;height:24px;padding:0 12px;border-top:1px solid #1a1f25;background:#0b0e11;color:#9f9d96;font-size:11px}.ds-status-code{display:flex;align-items:center;gap:8px;color:#e8e4d8;text-transform:uppercase;letter-spacing:0.14em}.ds-swatch{width:12px;height:8px;background:#a33b28}.ds-status-txn{color:#e6c27a;letter-spacing:0.14em}.ds-status-count{margin-left:auto;font-variant-numeric:tabular-nums}"
+    },
+    {
+      "name": "Rail Nav",
+      "kind": "nav",
+      "refersTo": "",
+      "description": "56px rail with 40x28 icon items; active outlined 1px stencil.",
+      "html": "<nav class=\"ds-rail\"><button class=\"ds-rail-item ds-rail-active\" aria-label=\"Connections\"><svg viewBox=\"0 0 24 24\" width=\"14\" height=\"14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect width=\"20\" height=\"8\" x=\"2\" y=\"2\" rx=\"2\"/><rect width=\"20\" height=\"8\" x=\"2\" y=\"14\" rx=\"2\"/><line x1=\"6\" x2=\"6.01\" y1=\"6\" y2=\"6\"/><line x1=\"6\" x2=\"6.01\" y1=\"18\" y2=\"18\"/></svg></button><button class=\"ds-rail-item\" aria-label=\"Keys\"><svg viewBox=\"0 0 24 24\" width=\"14\" height=\"14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"7.5\" cy=\"15.5\" r=\"5.5\"/><path d=\"m21 2-9.6 9.6\"/><path d=\"m15.5 7.5 3 3L22 7l-3-3\"/></svg></button></nav>",
+      "css": ".ds-rail{display:grid;justify-items:center;gap:4px;width:56px;padding:12px 8px;background:#0b0e11;border-right:1px solid #1a1f25}.ds-rail-item{display:grid;place-items:center;width:40px;height:28px;border:1px solid transparent;border-radius:2px;background:transparent;color:#9f9d96;cursor:pointer;transition:border-color 120ms,color 120ms}.ds-rail-item:hover{border-color:rgb(255 255 255 / 0.1);background:rgb(255 255 255 / 0.05);color:#e8e4d8}.ds-rail-active{border-color:#e8e4d8;color:#e8e4d8}.ds-rail-item:focus-visible{outline:1px solid #e8e4d8}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Container Stencil",
+    "overview": "Every database connection is a container in a night port. The ground is cold slate, the tab strip is corrugated steel, and each workspace tab is a painted container door carrying its connection group's line colour and a stencilled code (`PRD·orders`). A dropped connection is sealed HELD the way a customs-held box is. The engineer reads environment by colour and code before they read the query, which is what stops a statement meant for staging from running against production.\n\nThe system is dense, dark, and flat. One monospace face does everything. Every edge is a whole-pixel 1px hairline, every corner is 2px, nothing is blurred, glowing, or lifted by a soft shadow. Colour is rationed: the slate and stencil neutrals carry the chrome, and saturated colour appears only as a group's line colour, the seal of a held or destructive state, or the ochre of a decision that has not been committed yet. The SQL editor sits on pure black ink and is never tinted; data sits on port slate in a plain ruled grid.\n\nMotion is functional only: short opacity and border transitions on state, and a short flip when tabs reorder. Nothing animates for decoration, which keeps the client feeling as light as its claim.",
+    "keyCharacteristics": [
+      "Connection identity is a line colour plus a stencilled `GRP·CONN` code in tracked caps.",
+      "Exactly four line colours plus graphite for ungrouped; no fifth.",
+      "One shape per connection state, readable without colour.",
+      "1px hairlines, 2px corners, no soft shadows, no blur, no glass.",
+      "Pure black editor ink inside slate chrome; data on a ruled slate grid.",
+      "Sarasa Term in one weight everywhere."
+    ],
+    "rules": [
+      {
+        "name": "The Four Lines Rule",
+        "body": "Group identity uses exactly the four line colours plus graphite, assigned by group-name order. Never add a fifth line colour or hand-pick one per screen. Line colours mark groups and nothing else: never data types, never syntax, never object kinds.",
+        "section": "colors"
+      },
+      {
+        "name": "The Inactive Mix Rule",
+        "body": "An inactive tab mixes its line colour 55% into rib (`color-mix(in srgb, <line> 55%, rib)`) with a 1px hairline edge. Never fade the tab with opacity; the stencil text has to keep its contrast.",
+        "section": "colors"
+      },
+      {
+        "name": "The Seal Is Rare Rule",
+        "body": "Seal red means held, failed, or about to be destroyed. It never decorates.",
+        "section": "colors"
+      },
+      {
+        "name": "The Ochre Is Pending Rule",
+        "body": "Ochre means a decision is waiting on the user: save these edits, commit this transaction. Once the decision is made the ochre goes away.",
+        "section": "colors"
+      },
+      {
+        "name": "The Stencil Code Rule",
+        "body": "Anything that identifies a container (group code, connection code, HELD) is set in the label style: 11px uppercase tracked 0.14em, joined with a middle dot (`PRD·CONN`). Names of things inside the container (tab titles, tables, columns) are not codes and keep their own case.",
+        "section": "typography"
+      },
+      {
+        "name": "The Label Below Rule",
+        "body": "Tracked labels name the thing they sit on (a field, a column, a term). They never float above a heading as an eyebrow.",
+        "section": "typography"
+      },
+      {
+        "name": "The Data Is Verbatim Rule",
+        "body": "Cell values and SQL are never upper-cased, tracked, truncated mid-value without an ellipsis, or reformatted by the chrome. Numbers align right with tabular figures; everything else aligns left.",
+        "section": "typography"
+      },
+      {
+        "name": "The Pixel Honesty Rule",
+        "body": "Every edge is a whole-pixel 1px line. Nothing is soft: no drop shadows, no glows, no backdrop blur, no glass.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** mark every workspace tab with its group's line colour and `GRP·CONN` stencil code, and repeat both in the status line.",
+      "**Do** assign line colours from the four-colour set in group-name order, with graphite for ungrouped connections.",
+      "**Do** mix inactive tab fills 55% into rib and keep a 1px hairline edge on them.",
+      "**Do** use filled dot for live, ring for waiting, and the HELD seal for dropped or failed.",
+      "**Do** make destructive confirms solid seal and pending confirms (Save, Commit) solid ochre; make primary actions solid stencil with port text.",
+      "**Do** show staged edits in ochre and staged deletions in seal until they are saved or discarded.",
+      "**Do** keep every corner at 2px; use full rounding only for state dots and toggle parts.",
+      "**Do** keep the SQL editor on pure black ink (#000000) and data grids on port."
+    ],
+    "donts": [
+      "**Don't** use soft shadows, glows, backdrop blur, or glass surfaces anywhere.",
+      "**Don't** add a fifth line colour or tint a tab with opacity instead of the rib mix.",
+      "**Don't** use line colours for syntax, data types, or object kinds; they mark groups only.",
+      "**Don't** put eyebrow labels above headings.",
+      "**Don't** tint the editor background, stripe grid rows, or use cool grey for secondary text; secondary text is stencil-derived.",
+      "**Don't** upper-case, track, or reformat cell values or SQL.",
+      "**Don't** animate the HELD seal or add decorative motion.",
+      "**Don't** introduce a second typeface or weight."
+    ]
+  }
+}
