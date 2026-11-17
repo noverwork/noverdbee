@@ -3,7 +3,7 @@ use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use orm::models::{DbConnection, NewConnectionGroup, NewDbConnection, UpdateDbConnection};
 use orm::schema::{connection_groups, db_connections};
-use shared::{DbConnectionRecord, Environment};
+use shared::{DbConnectionRecord, Environment, McpAccess};
 use uuid::Uuid;
 
 use super::{internal_error, run_db, DbPool};
@@ -52,6 +52,10 @@ pub async fn connection_save(
                     path: record.path,
                     read_only: record.read_only,
                     environment: record.environment.as_str().to_string(),
+                    mcp_select: record.mcp.select,
+                    mcp_insert: record.mcp.insert,
+                    mcp_update: record.mcp.update,
+                    mcp_delete: record.mcp.delete,
                     updated_at: now,
                 };
                 let saved = if record.id.is_empty() {
@@ -142,5 +146,11 @@ fn to_record(row: DbConnection) -> DbConnectionRecord {
         path: row.path,
         read_only: row.read_only,
         environment: Environment::parse(&row.environment),
+        mcp: McpAccess {
+            select: row.mcp_select,
+            insert: row.mcp_insert,
+            update: row.mcp_update,
+            delete: row.mcp_delete,
+        },
     }
 }

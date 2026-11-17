@@ -209,6 +209,50 @@ impl PostgresSession {
         Ok(short.join(" "))
     }
 
+    /// Runs one query inside a read-only transaction and returns up to
+    /// `limit` rows as JSON objects, plus whether more rows existed. Leaves the
+    /// transaction open: call it on a session of its own and drop it after.
+    pub async fn select_json(
+        &self,
+        sql: &str,
+        limit: usize,
+    ) -> Result<(Vec<String>, bool), String> {
+        self.client
+            .batch_execute("BEGIN READ ONLY")
+            .await
+            .map_err(|error| describe(&error))?;
+        // The extended protocol refuses a second statement, so `sql` cannot
+        // end the transaction and carry on. The newlines keep a trailing `--`
+        // comment from swallowing the wrapper.
+        let sql = sql.trim().trim_end_matches(';');
+        let wrapped = format!(
+            "SELECT row_to_json(t)::text FROM (\n{sql}\n) t LIMIT {}",
+            limit + 1
+        );
+        let rows = self
+            .client
+            .query(&wrapped, &[])
+            .await
+            .map_err(|error| describe(&error))?;
+        let truncated = rows.len() > limit;
+        let rows = rows
+            .iter()
+            .take(limit)
+            .map(|row| row.try_get::<_, String>(0))
+            .collect::<Result<_, _>>()
+            .map_err(|error| describe(&error))?;
+        Ok((rows, truncated))
+    }
+
+    /// Runs one statement and returns the rows it changed.
+    pub async fn execute_one(&self, sql: &str) -> Result<u64, String> {
+        // The extended protocol refuses a second statement.
+        self.client
+            .execute(sql, &[])
+            .await
+            .map_err(|error| describe(&error))
+    }
+
     pub fn cancel(&self) {
         let (cancel, tls) = (self.cancel.clone(), self.tls.clone());
         tokio::spawn(async move {

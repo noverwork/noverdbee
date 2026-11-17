@@ -163,20 +163,14 @@ async fn a_read_only_session_rejects_writes_and_a_non_database_is_rejected() {
     assert!(Session::open(&bad).await.is_err());
 }
 
-/// Needs a server: set `NOVERDBEE_TEST_PG_URL`, for example
-/// `postgres://postgres:postgres@localhost:5432/postgres`. Skipped otherwise.
-#[tokio::test]
-async fn postgres_runs_lists_edits_and_points_at_errors() {
-    let Ok(url) = std::env::var("NOVERDBEE_TEST_PG_URL") else {
-        eprintln!("skipped: NOVERDBEE_TEST_PG_URL is not set");
-        return;
-    };
+/// A connection record for the server at `url`.
+fn pg_record(url: &str) -> DbConnectionRecord {
     let config: tokio_postgres::Config = url.parse().expect("a PostgreSQL URL");
     let host = match config.get_hosts().first() {
         Some(tokio_postgres::config::Host::Tcp(host)) => host.clone(),
         _ => panic!("the URL needs a TCP host"),
     };
-    let record = DbConnectionRecord {
+    DbConnectionRecord {
         id: "pg".to_string(),
         name: "test".to_string(),
         driver: DRIVER_POSTGRES.to_string(),
@@ -187,7 +181,18 @@ async fn postgres_runs_lists_edits_and_points_at_errors() {
         password: String::from_utf8_lossy(config.get_password().unwrap_or_default()).into_owned(),
         ssl_mode: "prefer".to_string(),
         ..DbConnectionRecord::default()
+    }
+}
+
+/// Needs a server: set `NOVERDBEE_TEST_PG_URL`, for example
+/// `postgres://postgres:postgres@localhost:5432/postgres`. Skipped otherwise.
+#[tokio::test]
+async fn postgres_runs_lists_edits_and_points_at_errors() {
+    let Ok(url) = std::env::var("NOVERDBEE_TEST_PG_URL") else {
+        eprintln!("skipped: NOVERDBEE_TEST_PG_URL is not set");
+        return;
     };
+    let record = pg_record(&url);
     let session = Session::open(&record).await.expect("connect");
     let version = session.version().await.expect("version");
     assert!(version.starts_with("PostgreSQL "), "{version}");
@@ -279,4 +284,115 @@ async fn postgres_runs_lists_edits_and_points_at_errors() {
     assert_eq!(position.map(|at| &bad[at..]), Some(";"));
 
     session.run(format!("DROP SCHEMA {schema} CASCADE")).await;
+}
+
+#[tokio::test]
+async fn sqlite_mcp_calls_run_one_statement_and_select_cannot_write() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let writable = Session::open(&record(&directory, false))
+        .await
+        .expect("open");
+    writable
+        .run(
+            "CREATE TABLE t (id INTEGER, name TEXT); INSERT INTO t VALUES (1, 'a'), (2, NULL);"
+                .to_string(),
+        )
+        .await;
+
+    assert_eq!(
+        writable
+            .execute_one("UPDATE t SET name = 'b' WHERE id = 2".to_string())
+            .await,
+        Ok(1)
+    );
+    // A condition cannot smuggle in a second statement.
+    assert!(writable
+        .execute_one("DELETE FROM t WHERE 1=1; DROP TABLE t".to_string())
+        .await
+        .is_err());
+
+    let reader = Session::open(&record(&directory, true))
+        .await
+        .expect("open");
+    assert_eq!(
+        reader
+            .select_json("SELECT id, name FROM t ORDER BY id".to_string(), 1)
+            .await,
+        Ok((vec![r#"{"id":1,"name":"a"}"#.to_string()], true))
+    );
+    assert!(reader
+        .select_json("DELETE FROM t".to_string(), 10)
+        .await
+        .is_err());
+    assert!(reader
+        .select_json("SELECT 1; DELETE FROM t".to_string(), 10)
+        .await
+        .is_err());
+    assert_eq!(
+        rows(&writable, "SELECT count(*) FROM t").await.rows,
+        vec![cells(&[Some("2")])]
+    );
+}
+
+/// Needs a server, like the test above.
+#[tokio::test]
+async fn postgres_mcp_select_is_read_only_and_writes_run_one_statement() {
+    let Ok(url) = std::env::var("NOVERDBEE_TEST_PG_URL") else {
+        eprintln!("skipped: NOVERDBEE_TEST_PG_URL is not set");
+        return;
+    };
+    let record = pg_record(&url);
+    let table = format!("noverdbee_mcp_{}", std::process::id());
+    let writer = Session::open(&record).await.expect("connect");
+    writer
+        .run(format!(
+            "DROP TABLE IF EXISTS {table}; CREATE TABLE {table} (id int, name text, ok boolean);"
+        ))
+        .await;
+    assert_eq!(
+        writer
+            .execute_one(format!(
+                "INSERT INTO {table} (id, name, ok) VALUES (1, 'a', TRUE), (2, NULL, FALSE)"
+            ))
+            .await,
+        Ok(2)
+    );
+    assert!(writer
+        .execute_one(format!("DELETE FROM {table} WHERE 1=1; DROP TABLE {table}"))
+        .await
+        .is_err());
+
+    // Each select gets a session of its own, as the MCP server does.
+    let select = |sql: String| {
+        let record = record.clone();
+        async move {
+            Session::open(&record)
+                .await
+                .expect("connect")
+                .select_json(sql, 1)
+                .await
+        }
+    };
+    assert_eq!(
+        select(format!("SELECT id, name, ok FROM {table} ORDER BY id;")).await,
+        Ok((vec![r#"{"id":1,"name":"a","ok":true}"#.to_string()], true))
+    );
+    // A trailing comment cannot swallow the wrapper.
+    assert!(select(format!("SELECT * FROM {table} -- note"))
+        .await
+        .is_ok());
+    for sneaky in [
+        format!("SELECT 1) t; DELETE FROM {table}; SELECT (1"),
+        format!("WITH gone AS (DELETE FROM {table} RETURNING *) SELECT * FROM gone"),
+        format!("SELECT 1 FROM {table}) t; COMMIT; DELETE FROM {table}; --"),
+    ] {
+        assert!(select(sneaky.clone()).await.is_err(), "{sneaky}");
+    }
+    assert_eq!(
+        rows(&writer, &format!("SELECT count(*) FROM {table}"))
+            .await
+            .rows,
+        vec![cells(&[Some("2")])]
+    );
+    writer.run(format!("DROP TABLE {table}")).await;
 }

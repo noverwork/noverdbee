@@ -16,7 +16,7 @@ struct JournalMode {
 
 /// Wires a real file-backed pool into a bare app handle so the tests below drive
 /// the actual commands, state injection included.
-fn test_app() -> (AppHandle, TempDir) {
+pub(crate) fn test_app() -> (AppHandle, TempDir) {
     let directory = tempfile::tempdir().expect("temp dir");
     let app = AppHandle::default();
     app.manage(test_pool(&directory));
@@ -193,11 +193,18 @@ fn connections_take_their_environment_from_the_group_they_were_in() {
     use diesel_migrations::MigrationHarness;
 
     let mut connection = SqliteConnection::establish(":memory:").expect("memory db");
-    let count = MigrationSource::<diesel::sqlite::Sqlite>::migrations(&super::MIGRATIONS)
+    let before = MigrationSource::<diesel::sqlite::Sqlite>::migrations(&super::MIGRATIONS)
         .expect("list")
-        .len();
-    // Every migration before this one.
-    for _ in 1..count {
+        .iter()
+        .position(|migration| {
+            migration
+                .name()
+                .to_string()
+                .ends_with("connection_environment")
+        })
+        .expect("the environment migration");
+    // Every migration before the environment one.
+    for _ in 0..before {
         connection
             .run_next_migration(super::MIGRATIONS)
             .expect("earlier migration");

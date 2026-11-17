@@ -62,6 +62,8 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.13", features = ["json"] }
 base64 = "0.22"
 minisign-verify = "0.2"
+# The MCP server for AI clients.
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "json"] }
 
 [dev-dependencies]
 # Offscreen rendering for the screenshot test. Enabled on the GPUI crates

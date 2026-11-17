@@ -135,6 +135,27 @@ impl Session {
         }
     }
 
+    /// Runs one read-only query; rows come back as JSON objects. Open a
+    /// session for this alone: PostgreSQL leaves its read-only transaction open.
+    pub async fn select_json(
+        &self,
+        sql: String,
+        limit: usize,
+    ) -> Result<(Vec<String>, bool), String> {
+        match self {
+            Session::Sqlite(session) => session.select_json(sql, limit).await,
+            Session::Postgres(session) => session.select_json(&sql, limit).await,
+        }
+    }
+
+    /// Runs exactly one statement and returns the rows it changed.
+    pub async fn execute_one(&self, sql: String) -> Result<u64, String> {
+        match self {
+            Session::Sqlite(session) => session.execute_one(sql).await,
+            Session::Postgres(session) => session.execute_one(&sql).await,
+        }
+    }
+
     /// Stops the statement that is running, if any.
     pub fn cancel(&self) {
         match self {

@@ -26,6 +26,10 @@ diesel::table! {
         created_at -> Timestamp,
         updated_at -> Timestamp,
         environment -> Text,
+        mcp_select -> Bool,
+        mcp_insert -> Bool,
+        mcp_update -> Bool,
+        mcp_delete -> Bool,
     }
 }
 

@@ -184,4 +184,4 @@ pub(crate) fn test_pool(directory: &tempfile::TempDir) -> DbPool {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
