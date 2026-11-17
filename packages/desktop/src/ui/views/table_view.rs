@@ -252,7 +252,7 @@ impl TableDelegate for EditGrid {
             .max()
             .unwrap_or(0);
         let grid_column = Column::new(format!("column-{col_ix}"), column.name.clone())
-            .width(px((longest as f32 * 7.5 + 24.).clamp(64., 320.)))
+            .width(px((longest as f32 * 8.5 + 24.).clamp(64., 320.)))
             .p_0()
             .movable(false)
             .sortable();
@@ -420,8 +420,10 @@ impl TableDelegate for EditGrid {
             if editing.row == row_ix && editing.column == column {
                 return div()
                     .size_full()
+                    .flex()
+                    .items_center()
                     .px_1()
-                    .child(Input::new(&editing.input).xsmall().appearance(false))
+                    .child(Input::new(&editing.input).small().appearance(false))
                     .into_any_element();
             }
         }
@@ -819,7 +821,7 @@ impl TableView {
                     .p_3()
                     .rounded(theme::RADIUS)
                     .bg(theme::INK)
-                    .text_xs()
+                    .text_sm()
                     .text_color(theme::STENCIL_DIM)
                     .child(text.clone()),
             )
@@ -1047,7 +1049,7 @@ impl TableView {
         let body = match &self.grid {
             Some(grid) => div()
                 .size_full()
-                .text_xs()
+                .text_sm()
                 .on_action({
                     let grid = grid.clone();
                     move |_: &CopyCells, _, cx| {
@@ -1059,9 +1061,9 @@ impl TableView {
                 .on_action(cx.listener(|this, _: &PasteCells, _, cx| this.paste(cx)))
                 .child(
                     DataTable::new(grid)
-                        .with_size(Size::Size(px(24.)))
+                        .with_size(Size::Size(px(32.)))
                         .bordered(false)
-                        .header_row_height(px(24.)),
+                        .header_row_height(px(32.)),
                 )
                 .into_any_element(),
             None => div()
@@ -1069,7 +1071,7 @@ impl TableView {
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_xs()
+                .text_sm()
                 .text_color(theme::STENCIL_FAINT)
                 .child(if self.loading {
                     t("Loading...")

@@ -310,7 +310,7 @@ impl SqlEditor {
             .overflow_y_scroll()
             .p_3()
             .gap_2()
-            .text_xs()
+            .text_sm()
             .children(self.messages.iter().map(|message| {
                 v_flex()
                     .gap_1()
@@ -351,7 +351,7 @@ impl SqlEditor {
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_xs()
+                .text_sm()
                 .text_color(theme::STENCIL_FAINT)
                 .child(if self.running {
                     t("Running...")

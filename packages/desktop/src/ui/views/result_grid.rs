@@ -18,8 +18,8 @@ pub type GridState = TableState<Grid>;
 
 /// Width of the row-number column.
 const NUMBER_WIDTH: Pixels = px(56.);
-/// Roughly one character of the 12px grid text.
-const CHARACTER_WIDTH: f32 = 7.5;
+/// Roughly one character of the 14px grid text.
+const CHARACTER_WIDTH: f32 = 8.5;
 
 pub struct Grid {
     result: ResultSet,
@@ -246,7 +246,7 @@ pub fn grid(state: &Entity<GridState>) -> impl IntoElement {
     let copy = state.clone();
     div()
         .size_full()
-        .text_xs()
+        .text_sm()
         .on_action(move |_: &CopyCells, _, cx| {
             if let Some(text) = selection::copied(copy.read(cx).delegate(), cx) {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
@@ -254,9 +254,9 @@ pub fn grid(state: &Entity<GridState>) -> impl IntoElement {
         })
         .child(
             DataTable::new(state)
-                .with_size(Size::Size(px(24.)))
+                .with_size(Size::Size(px(32.)))
                 .bordered(false)
-                .header_row_height(px(24.)),
+                .header_row_height(px(32.)),
         )
 }
 

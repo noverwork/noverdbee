@@ -183,10 +183,11 @@ pub fn cell_area<D: Selectable>(
 ) -> Div {
     div()
         .size_full()
+        .flex()
+        .items_center()
         .px_2()
-        .py_1()
         .when(picked, |cell| cell.bg(theme::wash()))
-        .child(content)
+        .child(div().w_full().min_w_0().child(content))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |table, event: &MouseDownEvent, _, cx| {
