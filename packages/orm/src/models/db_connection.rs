@@ -23,6 +23,10 @@ pub struct DbConnection {
     pub updated_at: NaiveDateTime,
     /// `local`, `development`, `staging` or `production`.
     pub environment: String,
+    pub mcp_select: bool,
+    pub mcp_insert: bool,
+    pub mcp_update: bool,
+    pub mcp_delete: bool,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -50,5 +54,9 @@ pub struct UpdateDbConnection {
     pub path: String,
     pub read_only: bool,
     pub environment: String,
+    pub mcp_select: bool,
+    pub mcp_insert: bool,
+    pub mcp_update: bool,
+    pub mcp_delete: bool,
     pub updated_at: NaiveDateTime,
 }

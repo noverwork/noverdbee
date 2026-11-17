@@ -327,6 +327,11 @@ mod shots {
         stage.settle(Duration::from_millis(500));
         stage.shoot("settings");
 
+        desktop_lib::app::runtime().block_on(desktop_lib::mcp::start(app.clone()));
+        stage.store(|store, cx| store.navigate(Route::Mcp, cx));
+        stage.settle(Duration::from_millis(500));
+        stage.shoot("mcp");
+
         let release = ui::views::updater::Release {
             version: "9.9.9".to_string(),
             notes: Some("- Faster table rendering\n- Fixes for wide results".to_string()),

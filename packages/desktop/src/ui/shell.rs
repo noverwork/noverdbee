@@ -102,6 +102,7 @@ impl Shell {
         let store_handle = self.store.clone();
         let active = match route {
             Route::Databases | Route::ConnectionForm(_) | Route::NewConnectionIn(_) => "databases",
+            Route::Mcp => "mcp",
             Route::Settings => "settings",
         };
 
@@ -146,6 +147,14 @@ impl Shell {
                         Route::Databases,
                         active == "databases",
                         cx,
+                    ))
+                    .child(self.nav_item(
+                        "nav-mcp",
+                        t("MCP"),
+                        "plug",
+                        Route::Mcp,
+                        active == "mcp",
+                        cx,
                     )),
             )
             .child(div().flex_1())
@@ -172,6 +181,7 @@ impl Shell {
             Route::Databases | Route::ConnectionForm(_) | Route::NewConnectionIn(_) => {
                 (t("Databases"), "database")
             }
+            Route::Mcp => (t("MCP"), "plug"),
             Route::Settings => (t("Settings"), "settings"),
         };
         h_flex()

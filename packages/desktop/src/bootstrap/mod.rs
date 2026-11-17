@@ -14,6 +14,7 @@ pub fn backend() -> Result<AppHandle, String> {
     let app = AppHandle::default();
     app.manage(pool);
     app.manage(crate::db::SessionManager::default());
+    app.manage(crate::mcp::McpState::default());
     Ok(app)
 }
 
@@ -25,5 +26,6 @@ pub fn run() {
         .init();
 
     let app = backend().expect("failed to start the backend");
+    crate::app::runtime().spawn(crate::mcp::start(app.clone()));
     crate::ui::run(app);
 }

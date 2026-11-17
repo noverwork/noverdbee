@@ -67,4 +67,21 @@ pub struct DbConnectionRecord {
     pub path: String,
     pub read_only: bool,
     pub environment: Environment,
+    pub mcp: McpAccess,
+}
+
+/// The MCP tools AI clients may use on a connection. All off keeps the
+/// connection out of MCP.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpAccess {
+    pub select: bool,
+    pub insert: bool,
+    pub update: bool,
+    pub delete: bool,
+}
+
+impl McpAccess {
+    pub fn any(self) -> bool {
+        self.select || self.insert || self.update || self.delete
+    }
 }

@@ -2,6 +2,7 @@
 
 pub mod common;
 pub mod db_connection_form;
+pub mod mcp;
 pub mod navigator;
 pub mod result_grid;
 pub mod selection;
@@ -30,6 +31,7 @@ pub fn build(route: &Route, window: &mut Window, cx: &mut App) -> AnyView {
             cx.new(|cx| db_connection_form::DbConnectionForm::new(None, group, window, cx))
                 .into()
         }
+        Route::Mcp => cx.new(|cx| mcp::McpView::new(window, cx)).into(),
         Route::Settings => cx.new(|cx| settings::SettingsView::new(window, cx)).into(),
     }
 }

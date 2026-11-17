@@ -3,13 +3,14 @@
 use std::time::Instant;
 
 use gpui_kit::component::button::Button;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::select::{Select, SelectEvent};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{h_flex, v_flex, Disableable as _, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use shared::{DbConnectionRecord, Environment};
+use shared::{DbConnectionRecord, Environment, McpAccess};
 
 use crate::db::{Session, SessionManager, DRIVER_POSTGRES, DRIVER_SQLITE};
 use crate::ui::bridge::backend;
@@ -66,6 +67,7 @@ pub struct DbConnectionForm {
     environment: Entity<ChoiceSelect>,
     path: Entity<InputState>,
     read_only: bool,
+    mcp: McpAccess,
     host: Entity<InputState>,
     port: Entity<InputState>,
     database: Entity<InputState>,
@@ -173,6 +175,7 @@ impl DbConnectionForm {
                     .default_value(existing.password)
             }),
             read_only: existing.read_only,
+            mcp: existing.mcp,
             driver,
             ssl_mode,
             store,
@@ -198,6 +201,7 @@ impl DbConnectionForm {
             environment: Environment::parse(
                 &common::selected(&self.environment, cx).unwrap_or_default(),
             ),
+            mcp: self.mcp,
             ..DbConnectionRecord::default()
         };
         if self.is_postgres(cx) {
@@ -438,6 +442,36 @@ impl DbConnectionForm {
     }
 }
 
+impl DbConnectionForm {
+    /// Which MCP tools AI clients may use here; all off keeps it out of MCP.
+    fn render_mcp(&self, cx: &Context<Self>) -> Div {
+        type Flag = fn(&mut McpAccess) -> &mut bool;
+        let tools: [(&'static str, Flag); 4] = [
+            ("select", |access| &mut access.select),
+            ("insert", |access| &mut access.insert),
+            ("update", |access| &mut access.update),
+            ("delete", |access| &mut access.delete),
+        ];
+        let mut mcp = self.mcp;
+        common::form_section(
+            "plug",
+            t("AI access (MCP)"),
+            Some(t(
+                "Tools AI clients may use on this connection. All off keeps it hidden.",
+            )),
+        )
+        .child(h_flex().gap_6().children(tools.map(|(name, flag)| {
+            Checkbox::new(SharedString::from(format!("mcp-{name}")))
+                .label(name)
+                .checked(*flag(&mut mcp))
+                .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                    *flag(&mut this.mcp) = *checked;
+                    cx.notify();
+                }))
+        })))
+    }
+}
+
 fn environment_label(environment: Environment) -> SharedString {
     match environment {
         Environment::Local => t("Local"),
@@ -485,6 +519,7 @@ impl Render for DbConnectionForm {
                 .gap_4()
                 .child(connection)
                 .child(details)
+                .child(self.render_mcp(cx))
                 .children(self.render_test()),
             h_flex()
                 .w_full()

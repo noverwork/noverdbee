@@ -14,6 +14,7 @@ pub enum Route {
     ConnectionForm(Option<String>),
     /// Add a connection to the group with this name.
     NewConnectionIn(String),
+    Mcp,
     Settings,
 }
 

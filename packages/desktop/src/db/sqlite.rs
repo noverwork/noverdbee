@@ -96,6 +96,64 @@ impl SqliteSession {
     pub fn cancel(&self) {
         self.interrupt.interrupt();
     }
+
+    /// Runs one statement that must not write, and returns up to `limit` rows
+    /// as JSON objects, plus whether more rows existed.
+    pub async fn select_json(
+        &self,
+        sql: String,
+        limit: usize,
+    ) -> Result<(Vec<String>, bool), String> {
+        self.blocking(move |connection| select_json(connection, &sql, limit))
+            .await?
+    }
+
+    /// Runs one statement and returns the rows it changed.
+    pub async fn execute_one(&self, sql: String) -> Result<u64, String> {
+        self.blocking(move |connection| {
+            // `prepare` refuses a second statement after the first.
+            let mut statement = connection.prepare(&sql)?;
+            statement.execute([]).map(|count| count as u64)
+        })
+        .await?
+        .map_err(|error| error.to_string())
+    }
+}
+
+fn select_json(
+    connection: &Connection,
+    sql: &str,
+    limit: usize,
+) -> Result<(Vec<String>, bool), String> {
+    // `prepare` refuses a second statement after the first.
+    let mut statement = connection.prepare(sql).map_err(|error| error.to_string())?;
+    if !statement.readonly() {
+        return Err("select runs read-only statements only".to_string());
+    }
+    let names: Vec<String> = statement
+        .column_names()
+        .iter()
+        .map(|name| serde_json::Value::from(*name).to_string())
+        .collect();
+    let mut rows = statement.raw_query();
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+        if out.len() == limit {
+            return Ok((out, true));
+        }
+        let mut fields = Vec::with_capacity(names.len());
+        for (index, name) in names.iter().enumerate() {
+            let value = match row.get_ref(index).map_err(|error| error.to_string())? {
+                ValueRef::Null => serde_json::Value::Null,
+                ValueRef::Integer(number) => number.into(),
+                ValueRef::Real(number) => number.into(),
+                other => text(other).into(),
+            };
+            fields.push(format!("{name}:{value}"));
+        }
+        out.push(format!("{{{}}}", fields.join(",")));
+    }
+    Ok((out, false))
 }
 
 fn join_error(error: tokio::task::JoinError) -> String {
