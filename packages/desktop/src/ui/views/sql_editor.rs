@@ -21,6 +21,7 @@ use crate::ui::i18n::{t, tf};
 use crate::ui::icons::lucide;
 use crate::ui::store::{store, Store};
 use crate::ui::theme;
+use crate::ui::views::common;
 use crate::ui::views::result_grid::{self, GridState};
 use crate::ui::views::sql_completion::SqlCompletion;
 
@@ -235,6 +236,32 @@ impl SqlEditor {
         if sql.trim().is_empty() {
             return;
         }
+        let production = self
+            .store
+            .read(cx)
+            .connection(&self.connection)
+            .is_some_and(|record| record.environment == shared::Environment::Production);
+        if !production || !crate::db::sql::writes(&sql) {
+            self.start(sql, base, window, cx);
+            return;
+        }
+        let editor = cx.weak_entity();
+        common::confirm_delete(
+            t("Run on production?"),
+            t("This SQL can change data or schema on a production database."),
+            None,
+            t("Run"),
+            window,
+            cx,
+            move |window, cx| {
+                let sql = sql.clone();
+                let _ = editor.update(cx, |this, cx| this.start(sql, base, window, cx));
+            },
+        );
+    }
+
+    /// Records `sql` in the history and runs it.
+    fn start(&mut self, sql: String, base: usize, window: &mut Window, cx: &mut Context<Self>) {
         let app = self.store.read(cx).app();
         let (connection, saved) = (self.connection.clone(), sql.clone());
         crate::app::runtime().spawn(async move {

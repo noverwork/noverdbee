@@ -141,6 +141,33 @@ pub fn split_statements(sql: &str) -> Vec<Range<usize>> {
     statements
 }
 
+/// Whether `sql` may change data or schema: it names a writing keyword outside
+/// strings, quoted names, and comments. `FOR UPDATE` does not count. It errs
+/// toward yes, since it only decides whether to ask first.
+pub fn writes(sql: &str) -> bool {
+    const WRITES: [&str; 13] = [
+        "insert", "update", "delete", "merge", "drop", "truncate", "alter", "create", "grant",
+        "revoke", "replace", "upsert", "copy",
+    ];
+    let mut code = sql.as_bytes().to_vec();
+    for range in scan(sql).1 {
+        let end = range.end.min(code.len());
+        code[range.start..end].fill(b' ');
+    }
+    let code = String::from_utf8_lossy(&code).to_ascii_lowercase();
+    let mut previous = "";
+    for word in code.split(|c: char| !(c == '_' || c.is_ascii_alphanumeric())) {
+        if word.is_empty() {
+            continue;
+        }
+        if WRITES.contains(&word) && !(word == "update" && previous == "for") {
+            return true;
+        }
+        previous = word;
+    }
+    false
+}
+
 /// Whether a cursor at byte `offset` sits inside a string, a quoted name, a
 /// comment, or a dollar-quoted body.
 pub fn in_literal(sql: &str, offset: usize) -> bool {
@@ -248,6 +275,19 @@ fn scan(sql: &str) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tells_writing_sql_from_reading_sql() {
+        assert!(!writes("SELECT * FROM users WHERE name = 'drop table'"));
+        assert!(!writes("select 1 -- delete later\n; /* update */"));
+        assert!(!writes(r#"SELECT "delete" FROM t FOR UPDATE"#));
+        assert!(writes("delete from users"));
+        assert!(writes(
+            "WITH gone AS (DELETE FROM t RETURNING *) SELECT * FROM gone"
+        ));
+        assert!(writes("EXPLAIN ANALYZE UPDATE t SET a = 1"));
+        assert!(writes("select 1; DROP TABLE t"));
+    }
 
     fn pair(column: &str, value: Option<&str>) -> (String, Value) {
         (column.to_string(), value.map(str::to_string))
