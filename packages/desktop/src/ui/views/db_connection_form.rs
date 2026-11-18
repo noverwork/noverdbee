@@ -16,7 +16,7 @@ use crate::db::tunnel::{TUNNEL_KUBERNETES, TUNNEL_SSH};
 use crate::db::{Session, SessionManager, DRIVER_POSTGRES, DRIVER_SQLITE};
 use crate::ui::bridge::backend;
 use crate::ui::i18n::{t, tf};
-use crate::ui::store::{store, Route, Store};
+use crate::ui::store::{store, Store};
 use crate::ui::theme;
 use crate::ui::views::common::{self, Choice, ChoiceSelect};
 
@@ -315,8 +315,7 @@ impl DbConnectionForm {
     }
 
     fn close(&mut self, cx: &mut Context<Self>) {
-        self.store
-            .update(cx, |store, cx| store.navigate(Route::Databases, cx));
+        self.store.update(cx, |store, cx| store.close_form(cx));
     }
 
     fn browse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -430,7 +429,7 @@ impl DbConnectionForm {
     }
 
     fn render_file(&self, cx: &Context<Self>) -> Div {
-        common::form_section("file", t("SQLite file"), None).child(common::field(
+        common::field(
             t("Path"),
             h_flex()
                 .gap_2()
@@ -442,7 +441,7 @@ impl DbConnectionForm {
                         .on_click(cx.listener(|this, _, window, cx| this.browse(window, cx))),
                 ),
             self.errors.path.map(t),
-        ))
+        )
     }
 
     /// The group field, with the existing groups to pick from so a typo does
@@ -473,7 +472,7 @@ impl DbConnectionForm {
             })
     }
 
-    fn render_server(&self, cx: &App) -> Div {
+    fn render_server(&self, cx: &App) -> common::FormSection {
         let kubernetes = common::selected(&self.tunnel, cx).as_deref() == Some(TUNNEL_KUBERNETES);
         let address = if kubernetes {
             // The tunnel's resource names the pod; only the port is needed.
@@ -497,40 +496,33 @@ impl DbConnectionForm {
                     self.errors.port.map(t),
                 )))
         };
-        common::form_section("server", t("Server"), None)
+        common::form_section(t("Server"), None)
             .child(address)
-            .child(common::field(
-                t("Database"),
-                Input::new(&self.database),
-                None,
+            .child(common::field_pair(
+                common::field(
+                    t("User"),
+                    Input::new(&self.username),
+                    self.errors.username.map(t),
+                ),
+                common::field(
+                    t("Password"),
+                    Input::new(&self.password).mask_toggle(),
+                    None,
+                ),
             ))
-            .child(common::field(
-                t("User"),
-                Input::new(&self.username),
-                self.errors.username.map(t),
-            ))
-            .child(common::field(
-                t("Password"),
-                Input::new(&self.password).mask_toggle(),
-                None,
-            ))
-            .child(common::field(
-                t("SSL mode"),
-                Select::new(&self.ssl_mode),
-                None,
+            .child(common::field_pair(
+                common::field(t("Database"), Input::new(&self.database), None),
+                common::field(t("SSL mode"), Select::new(&self.ssl_mode), None),
             ))
     }
 }
 
 impl DbConnectionForm {
     /// How to reach the server: directly, through SSH, or a Kubernetes pod.
-    fn render_tunnel(&self, cx: &App) -> Div {
+    fn render_tunnel(&self, cx: &App) -> common::FormSection {
         let tunnel = common::selected(&self.tunnel, cx).unwrap_or_default();
-        let section = common::form_section("route", t("Tunnel"), None).child(common::field(
-            t("Connect through"),
-            Select::new(&self.tunnel),
-            None,
-        ));
+        let through = common::field(t("Connect through"), Select::new(&self.tunnel), None);
+        let section = common::form_section(t("Tunnel"), None);
         // What to pick from, or where to add the first one.
         let pick = |label: SharedString,
                     select: &Entity<ChoiceSelect>,
@@ -541,47 +533,47 @@ impl DbConnectionForm {
             )
         };
         let store = self.store.read(cx);
+        // The way through and what it goes through share a row.
         match tunnel.as_str() {
-            TUNNEL_SSH => section.child(pick(
-                t("SSH host"),
-                &self.ssh_host,
-                self.errors.ssh_host,
-                store
-                    .ssh_hosts
-                    .is_empty()
-                    .then(|| t("No SSH hosts saved yet. Add one on the SSH Hosts page.")),
+            TUNNEL_SSH => section.child(common::field_pair(
+                through,
+                pick(
+                    t("SSH host"),
+                    &self.ssh_host,
+                    self.errors.ssh_host,
+                    store
+                        .ssh_hosts
+                        .is_empty()
+                        .then(|| t("No SSH hosts saved yet. Add one on the SSH Hosts page.")),
+                ),
             )),
             TUNNEL_KUBERNETES => section
-                .child(pick(
-                    t("Kubeconfig"),
-                    &self.kubeconfig,
-                    self.errors.kubeconfig,
-                    store
-                        .kubeconfigs
-                        .is_empty()
-                        .then(|| t("No kubeconfigs saved yet. Add one on the Kubeconfigs page.")),
+                .child(common::field_pair(
+                    through,
+                    pick(
+                        t("Kubeconfig"),
+                        &self.kubeconfig,
+                        self.errors.kubeconfig,
+                        store.kubeconfigs.is_empty().then(|| {
+                            t("No kubeconfigs saved yet. Add one on the Kubeconfigs page.")
+                        }),
+                    ),
                 ))
-                .child(common::field(
-                    t("Context"),
-                    Input::new(&self.kube_context),
-                    None,
-                ))
-                .child(common::field(
-                    t("Namespace"),
-                    Input::new(&self.kube_namespace),
-                    None,
+                .child(common::field_pair(
+                    common::field(t("Context"), Input::new(&self.kube_context), None),
+                    common::field(t("Namespace"), Input::new(&self.kube_namespace), None),
                 ))
                 .child(common::field(
                     t("Resource"),
                     Input::new(&self.kube_resource),
                     self.errors.kube_resource.map(t),
                 )),
-            _ => section,
+            _ => section.child(common::field_pair(through, div())),
         }
     }
 
     /// Which MCP tools AI clients may use here; all off keeps it out of MCP.
-    fn render_mcp(&self, cx: &Context<Self>) -> Div {
+    fn render_mcp(&self, cx: &Context<Self>) -> common::FormSection {
         type Flag = fn(&mut McpAccess) -> &mut bool;
         let tools: [(&'static str, Flag); 4] = [
             ("select", |access| &mut access.select),
@@ -592,11 +584,8 @@ impl DbConnectionForm {
         let mut mcp = self.mcp;
         let read_only = self.read_only;
         common::form_section(
-            "plug",
             t("AI access (MCP)"),
-            Some(t(
-                "Tools AI clients may use on this connection. All off keeps it hidden.",
-            )),
+            Some(t("All off hides this connection from AI clients.")),
         )
         .child(h_flex().gap_6().children(tools.map(|(name, flag)| {
             Checkbox::new(SharedString::from(format!("mcp-{name}")))
@@ -622,28 +611,17 @@ fn environment_label(environment: Environment) -> SharedString {
 
 impl Render for DbConnectionForm {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let title = if self.id.is_some() {
-            t("Edit connection")
-        } else {
-            t("New connection")
-        };
-        let connection = common::form_section("database", t("Connection"), None)
-            .child(common::field(
-                t("Database type"),
-                Select::new(&self.driver),
-                None,
+        let postgres = self.is_postgres(cx);
+        let connection = common::form_section(None, None)
+            .child(common::field_pair(
+                common::field(t("Database type"), Select::new(&self.driver), None),
+                common::field(t("Environment"), Select::new(&self.environment), None),
             ))
-            .child(common::field(
-                t("Name"),
-                Input::new(&self.name),
-                self.errors.name.map(t),
+            .child(common::field_pair(
+                common::field(t("Name"), Input::new(&self.name), self.errors.name.map(t)),
+                common::field(t("Group"), self.render_group(cx), None),
             ))
-            .child(common::field(
-                t("Environment"),
-                Select::new(&self.environment),
-                None,
-            ))
-            .child(common::field(t("Group"), self.render_group(cx), None))
+            .when(!postgres, |section| section.child(self.render_file(cx)))
             .child(
                 Switch::new("read-only")
                     .checked(self.read_only)
@@ -653,22 +631,18 @@ impl Render for DbConnectionForm {
                         cx.notify();
                     })),
             );
-        let postgres = self.is_postgres(cx);
-        let details = if postgres {
-            self.render_server(cx)
-        } else {
-            self.render_file(cx)
-        };
         let testing = matches!(self.test, Test::Running);
 
         common::form_page(
-            title,
             self.error.clone(),
             v_flex()
-                .gap_4()
+                .gap_5()
                 .child(connection)
-                .child(details)
-                .when(postgres, |form| form.child(self.render_tunnel(cx)))
+                // The tunnel decides which address fields the server asks for.
+                .when(postgres, |form| {
+                    form.child(self.render_tunnel(cx))
+                        .child(self.render_server(cx))
+                })
                 .child(self.render_mcp(cx))
                 .children(self.render_test()),
             h_flex()

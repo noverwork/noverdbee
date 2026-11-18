@@ -254,8 +254,7 @@ impl SshHostForm {
     }
 
     fn back(&mut self, cx: &mut Context<Self>) {
-        self.store
-            .update(cx, |store, cx| store.navigate(Route::SshHosts, cx));
+        self.store.update(cx, |store, cx| store.close_form(cx));
     }
 
     fn save(&mut self, cx: &mut Context<Self>) {
@@ -330,16 +329,11 @@ impl Render for SshHostForm {
         });
 
         common::form_page(
-            if editing {
-                t("Edit SSH host")
-            } else {
-                t("New SSH host")
-            },
             self.error.clone(),
             v_flex()
-                .gap_4()
+                .gap_5()
                 .child(
-                    common::form_section("server", t("Endpoint"), None)
+                    common::form_section(None, None)
                         .child(common::field(
                             t("Name"),
                             Input::new(&self.name).disabled(saving),
@@ -374,7 +368,7 @@ impl Render for SshHostForm {
                         )),
                 )
                 .child(
-                    common::form_section("key-round", t("Authentication"), None)
+                    common::form_section(t("Authentication"), None)
                         .child(common::field(
                             t("Password"),
                             Input::new(&self.password).mask_toggle().disabled(saving),

@@ -3,7 +3,7 @@
 use gpui_kit::component::button::Button;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{h_flex, v_flex, Sizable as _};
+use gpui_kit::component::{h_flex, v_flex, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -41,6 +41,8 @@ pub struct Shell {
     workspace: Option<Entity<Workspace>>,
     /// The page for the current route; rebuilt when the route changes.
     page: Option<(Route, AnyView)>,
+    /// The form shown in the drawer.
+    form: Option<Route>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -57,6 +59,7 @@ impl Shell {
                 }
             }
             route = now;
+            this.sync_form(window, cx);
             cx.notify();
         });
         views::start_update_check(window, cx);
@@ -64,8 +67,39 @@ impl Shell {
             workspace: None,
             store,
             page: None,
+            form: None,
             _subscriptions: vec![changes],
         }
+    }
+
+    /// Opens or closes the form drawer to match the store.
+    fn sync_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let wanted = self.store.read(cx).form.clone();
+        if wanted == self.form {
+            return;
+        }
+        self.form = wanted.clone();
+        let Some(route) = wanted else {
+            window.close_sheet(cx);
+            return;
+        };
+        let view = views::build(&route, window, cx);
+        let (title, width) = views::form_frame(&route);
+        let store = self.store.clone();
+        window.open_sheet(cx, move |sheet, _, _| {
+            let store = store.clone();
+            sheet
+                .title(title.clone())
+                .size(width)
+                .resizable(false)
+                .overlay_closable(false)
+                .px_0()
+                .shadow_none()
+                .bg(theme::PORT)
+                .border_color(theme::hairline())
+                .on_close(move |_, _, cx| store.update(cx, |store, cx| store.close_form(cx)))
+                .child(view.clone())
+        });
     }
 
     pub fn workspace(&self) -> Option<&Entity<Workspace>> {

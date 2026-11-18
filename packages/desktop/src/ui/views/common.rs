@@ -53,60 +53,44 @@ pub fn page_body(id: &'static str) -> Stateful<Div> {
     div().id(id).mt_6().flex_1().min_h_0().overflow_y_scroll()
 }
 
-/// The frame of a form page: title, scrolling fields, then Cancel and Save.
+/// The body of a form drawer: scrolling fields, then Cancel and Save.
 pub fn form_page(
-    title: SharedString,
     error: Option<SharedString>,
     fields: impl IntoElement,
     footer: impl IntoElement,
 ) -> Div {
+    // The drawer body scrolls and so gives its content no height; filling it
+    // absolutely keeps Cancel and Save pinned while only the fields scroll.
     v_flex()
-        .size_full()
-        .px_8()
-        .py_6()
-        .bg(theme::PORT)
+        .absolute()
+        .inset_0()
         .text_color(theme::STENCIL)
         .child(
-            v_flex()
+            div()
+                .id("form-fields")
                 .flex_1()
                 .min_h_0()
-                .p_6()
+                .overflow_y_scroll()
                 .child(
-                    div()
-                        .pb_4()
-                        .border_b_1()
-                        .border_color(theme::hairline())
-                        .text_2xl()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(title),
-                )
-                .child(
-                    div()
-                        .id("form-fields")
-                        .flex_1()
-                        .min_h_0()
-                        .overflow_y_scroll()
-                        .child(
-                            v_flex()
-                                .mx_auto()
-                                .w_full()
-                                .max_w(px(768.))
-                                .gap_4()
-                                .py_4()
-                                .children(error.map(error_banner))
-                                .child(fields),
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .flex_shrink_0()
-                        .justify_end()
-                        .gap_2()
-                        .pt_4()
-                        .border_t_1()
-                        .border_color(theme::hairline())
-                        .child(footer),
+                    v_flex()
+                        .gap_5()
+                        // Level with the drawer's title and close button.
+                        .px_4()
+                        .py_4()
+                        .children(error.map(error_banner))
+                        .child(fields),
                 ),
+        )
+        .child(
+            h_flex()
+                .flex_shrink_0()
+                .justify_end()
+                .gap_2()
+                .px_4()
+                .py_4()
+                .border_t_1()
+                .border_color(theme::hairline())
+                .child(footer),
         )
 }
 
@@ -136,27 +120,65 @@ pub fn form_buttons(
         )
 }
 
-/// A bordered group of fields with an icon and a title.
-pub fn form_section(icon: &'static str, title: SharedString, hint: Option<SharedString>) -> Div {
-    v_flex()
-        .gap_3()
-        .p_4()
-        .rounded(theme::RADIUS)
-        .border_1()
-        .border_color(theme::hairline())
-        .bg(theme::RIB)
-        .child(
-            h_flex().gap_3().pb_1().child(icon_box(icon)).child(
+/// A group of fields under a title, with a rule over it. Add the fields with
+/// `child`. Pass no title for the first group, which the drawer title already
+/// names; it gets no rule either.
+#[derive(IntoElement)]
+pub struct FormSection {
+    title: Option<SharedString>,
+    hint: Option<SharedString>,
+    fields: Vec<AnyElement>,
+}
+
+pub fn form_section(
+    title: impl Into<Option<SharedString>>,
+    hint: Option<SharedString>,
+) -> FormSection {
+    FormSection {
+        title: title.into(),
+        hint,
+        fields: Vec::new(),
+    }
+}
+
+impl ParentElement for FormSection {
+    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
+        self.fields.extend(elements);
+    }
+}
+
+impl RenderOnce for FormSection {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let fields = v_flex().gap_4().children(self.fields);
+        let Some(title) = self.title else {
+            return fields;
+        };
+        v_flex()
+            .gap_4()
+            .pt_5()
+            .border_t_1()
+            .border_color(theme::hairline())
+            .child(
                 v_flex()
                     .gap_1()
-                    .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(title))
+                    .child(div().text_sm().child(title))
                     .children(
-                        hint.map(|hint| {
+                        self.hint.map(|hint| {
                             div().text_xs().text_color(theme::STENCIL_MUTE).child(hint)
                         }),
                     ),
-            ),
-        )
+            )
+            .child(fields)
+    }
+}
+
+/// Two fields side by side, each taking half the row.
+pub fn field_pair(left: impl IntoElement, right: impl IntoElement) -> Div {
+    h_flex()
+        .items_start()
+        .gap_3()
+        .child(div().flex_1().min_w_0().child(left))
+        .child(div().flex_1().min_w_0().child(right))
 }
 
 /// The 40px bordered square that holds a row's or section's icon.
@@ -177,8 +199,8 @@ pub fn icon_box(icon: &'static str) -> Div {
 /// A label over a control, with an optional validation message under it.
 pub fn field(label: SharedString, control: impl IntoElement, error: Option<SharedString>) -> Div {
     v_flex()
-        .gap_2()
-        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(label))
+        .gap_1p5()
+        .child(div().text_xs().text_color(theme::STENCIL_DIM).child(label))
         .child(control)
         .children(error.map(|error| div().text_xs().text_color(theme::RED_TEXT).child(error)))
 }

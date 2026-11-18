@@ -253,8 +253,7 @@ impl SshKeyForm {
     }
 
     fn back(&mut self, cx: &mut Context<Self>) {
-        self.store
-            .update(cx, |store, cx| store.navigate(Route::SshKeys, cx));
+        self.store.update(cx, |store, cx| store.close_form(cx));
     }
 
     fn save(&mut self, cx: &mut Context<Self>) {
@@ -324,30 +323,24 @@ impl Render for SshKeyForm {
                 )
         });
         common::form_page(
-            if editing {
-                t("Edit SSH key")
-            } else {
-                t("New SSH key")
-            },
             self.error.clone(),
             v_flex()
                 .gap_4()
-                .child(
-                    common::form_section("key-round", t("Key identity"), None)
-                        .children(fingerprint)
-                        .child(common::field(
-                            t("Key name"),
-                            Input::new(&self.name).disabled(saving),
-                            None,
-                        ))
-                        .child(common::field(
-                            SharedString::from(format!("{} {}", t("Passphrase"), t("(optional)"))),
-                            Input::new(&self.passphrase).disabled(saving),
-                            None,
-                        )),
-                )
-                .child(
-                    common::form_section("key-round", t("Private key"), None)
+                .children(fingerprint)
+                .child(common::field(
+                    t("Name"),
+                    Input::new(&self.name).disabled(saving),
+                    None,
+                ))
+                .child(common::field(
+                    SharedString::from(format!("{} {}", t("Passphrase"), t("(optional)"))),
+                    Input::new(&self.passphrase).disabled(saving),
+                    None,
+                ))
+                .child(common::field(
+                    t("Private key"),
+                    v_flex()
+                        .gap_2()
                         .child(
                             h_flex().child(
                                 Button::new("import-key")
@@ -362,7 +355,8 @@ impl Render for SshKeyForm {
                             ),
                         )
                         .child(Textarea::new(&self.private_key).disabled(saving)),
-                ),
+                    None,
+                )),
             common::form_buttons(
                 submit_label,
                 saving,
