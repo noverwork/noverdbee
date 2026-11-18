@@ -116,6 +116,9 @@ impl Shell {
         let store_handle = self.store.clone();
         let active = match route {
             Route::Databases | Route::ConnectionForm(_) | Route::NewConnectionIn(_) => "databases",
+            Route::SshHosts | Route::SshHostForm(_) => "ssh-hosts",
+            Route::SshKeys | Route::SshKeyForm(_) => "ssh-keys",
+            Route::Kubeconfigs | Route::KubeconfigForm(_) => "kubeconfigs",
             Route::Mcp => "mcp",
             Route::Settings => "settings",
         };
@@ -163,6 +166,30 @@ impl Shell {
                         cx,
                     ))
                     .child(self.nav_item(
+                        "nav-ssh-hosts",
+                        t("SSH Hosts"),
+                        "server",
+                        Route::SshHosts,
+                        active == "ssh-hosts",
+                        cx,
+                    ))
+                    .child(self.nav_item(
+                        "nav-ssh-keys",
+                        t("Keys"),
+                        "key-round",
+                        Route::SshKeys,
+                        active == "ssh-keys",
+                        cx,
+                    ))
+                    .child(self.nav_item(
+                        "nav-kubeconfigs",
+                        t("Kubeconfigs"),
+                        "ship-wheel",
+                        Route::Kubeconfigs,
+                        active == "kubeconfigs",
+                        cx,
+                    ))
+                    .child(self.nav_item(
                         "nav-mcp",
                         t("MCP"),
                         "plug",
@@ -195,6 +222,9 @@ impl Shell {
             Route::Databases | Route::ConnectionForm(_) | Route::NewConnectionIn(_) => {
                 (t("Databases"), "database")
             }
+            Route::SshHosts | Route::SshHostForm(_) => (t("SSH Hosts"), "server"),
+            Route::SshKeys | Route::SshKeyForm(_) => (t("Keys"), "key-round"),
+            Route::Kubeconfigs | Route::KubeconfigForm(_) => (t("Kubeconfigs"), "ship-wheel"),
             Route::Mcp => (t("MCP"), "plug"),
             Route::Settings => (t("Settings"), "settings"),
         };

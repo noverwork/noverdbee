@@ -3,7 +3,9 @@
 use std::collections::HashSet;
 
 use gpui_kit::*;
-use shared::{DbConnectionRecord, GroupRecord, Setting};
+use shared::{
+    DbConnectionRecord, GroupRecord, KubeconfigRecord, Setting, SshHostRecord, SshKeyRecord,
+};
 
 use crate::app::AppHandle;
 use crate::ui::bridge::backend;
@@ -16,6 +18,15 @@ pub enum Route {
     ConnectionForm(Option<String>),
     /// Add a connection to the group with this name.
     NewConnectionIn(String),
+    SshHosts,
+    /// Add an SSH host, or edit the one with this id.
+    SshHostForm(Option<String>),
+    SshKeys,
+    /// Add an SSH key, or edit the one with this id.
+    SshKeyForm(Option<String>),
+    Kubeconfigs,
+    /// Add a kubeconfig, or edit the one with this id.
+    KubeconfigForm(Option<String>),
     Mcp,
     Settings,
 }
@@ -27,6 +38,9 @@ pub struct Store {
     pub load_error: Option<String>,
     pub groups: Vec<GroupRecord>,
     pub connections: Vec<DbConnectionRecord>,
+    pub ssh_hosts: Vec<SshHostRecord>,
+    pub ssh_keys: Vec<SshKeyRecord>,
+    pub kubeconfigs: Vec<KubeconfigRecord>,
     pub settings: Vec<Setting>,
     /// Connections whose session has a transaction open, as last checked.
     pub transactions: HashSet<String>,
@@ -52,6 +66,9 @@ impl Store {
             load_error: None,
             groups: Vec::new(),
             connections: Vec::new(),
+            ssh_hosts: Vec::new(),
+            ssh_keys: Vec::new(),
+            kubeconfigs: Vec::new(),
             settings: Vec::new(),
             transactions: HashSet::new(),
         };
@@ -79,16 +96,22 @@ impl Store {
                     crate::store::settings::get_all_settings(app.state()).await?,
                     crate::store::groups::group_list(app.state()).await?,
                     crate::store::connections::connection_list(app.state()).await?,
+                    crate::store::tunnels::ssh_host_list(app.state()).await?,
+                    crate::store::tunnels::ssh_key_list(app.state()).await?,
+                    crate::store::tunnels::kubeconfig_list(app.state()).await?,
                 ))
             })
             .await;
             let _ = this.update(cx, |this, cx| {
                 match loaded {
-                    Ok((settings, groups, connections)) => {
+                    Ok((settings, groups, connections, ssh_hosts, ssh_keys, kubeconfigs)) => {
                         let first_load = this.loading;
                         this.settings = settings;
                         this.groups = groups;
                         this.connections = connections;
+                        this.ssh_hosts = ssh_hosts;
+                        this.ssh_keys = ssh_keys;
+                        this.kubeconfigs = kubeconfigs;
                         this.load_error = None;
                         if first_load {
                             let saved = this.setting(i18n::LOCALE_SETTING);

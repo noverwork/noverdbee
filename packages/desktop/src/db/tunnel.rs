@@ -1,5 +1,5 @@
-//! Port forwards a connection opens before it connects: through an SSH
-//! server, or to a pod in a Kubernetes cluster. The database client then connects
+//! Port forwards a connection opens before it connects: through a saved SSH
+//! host, or to a pod in a Kubernetes cluster. The database client then connects
 //! to the forward's port on 127.0.0.1.
 
 use std::net::Ipv4Addr;
@@ -12,9 +12,9 @@ use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 use kube::api::{Api, ListParams};
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use russh::client::{self, Handle};
-use russh::keys::ssh_key::Algorithm;
+use russh::keys::ssh_key::{Algorithm, HashAlg};
 use russh::keys::{decode_secret_key, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
-use shared::DbConnectionRecord;
+use shared::{DbConnectionRecord, SshLogin};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
@@ -75,28 +75,32 @@ impl client::Handler for SshHandler {
 }
 
 async fn ssh(record: &DbConnectionRecord, target_port: u16) -> Result<Tunnel, String> {
+    let login = record
+        .ssh
+        .as_ref()
+        .ok_or("choose an SSH host for this connection")?;
     let ssh_port =
-        u16::try_from(record.ssh_port).map_err(|_| "the SSH port is out of range".to_string())?;
+        u16::try_from(login.port).map_err(|_| "the SSH port is out of range".to_string())?;
     let config = Arc::new(client::Config {
         // Notice a dead link, as the PostgreSQL keepalive does.
         keepalive_interval: Some(Duration::from_secs(30)),
         ..Default::default()
     });
     let handler = SshHandler {
-        host: record.ssh_host.clone(),
+        host: login.host.clone(),
         port: ssh_port,
     };
-    let mut handle = client::connect(config, (record.ssh_host.as_str(), ssh_port), handler)
+    let mut handle = client::connect(config, (login.host.as_str(), ssh_port), handler)
         .await
         .map_err(|error| match error {
             russh::Error::Keys(russh::keys::Error::KeyChanged { line }) => format!(
                 "the SSH host key of {} changed (known_hosts line {line}); \
                  remove that line if the change is expected",
-                record.ssh_host
+                login.host
             ),
             error => format!("cannot reach the SSH server: {error}"),
         })?;
-    authenticate(&mut handle, record).await?;
+    authenticate(&mut handle, login).await?;
 
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .await
@@ -137,16 +141,12 @@ async fn ssh(record: &DbConnectionRecord, target_port: u16) -> Result<Tunnel, St
     Ok(Tunnel { port, task })
 }
 
-/// Signs in with the key when one is set (its passphrase is the password),
-/// falling back to the password; with no key, with the password.
-async fn authenticate(
-    handle: &mut Handle<SshHandler>,
-    record: &DbConnectionRecord,
-) -> Result<(), String> {
-    let user = record.ssh_user.clone();
-    let key_path = record.ssh_key_path.trim();
-    if !key_path.is_empty() {
-        let key = load_key(key_path, &record.ssh_password)?;
+/// Signs in with the host's key when it has one, falling back to its
+/// password; with no key, with the password.
+async fn authenticate(handle: &mut Handle<SshHandler>, login: &SshLogin) -> Result<(), String> {
+    let user = login.username.clone();
+    if !login.private_key.is_empty() {
+        let key = read_key(&login.private_key, &login.passphrase)?;
         let hash = if matches!(key.algorithm(), Algorithm::Rsa { .. }) {
             handle
                 .best_supported_rsa_hash()
@@ -166,12 +166,12 @@ async fn authenticate(
         if result.success() {
             return Ok(());
         }
-        if record.ssh_password.is_empty() {
+        if login.password.is_empty() {
             return Err("the SSH server rejected the key".to_string());
         }
     }
     let result = handle
-        .authenticate_password(user, record.ssh_password.clone())
+        .authenticate_password(user, login.password.clone())
         .await
         .map_err(|error| format!("SSH sign-in failed: {error}"))?;
     if result.success() {
@@ -181,26 +181,36 @@ async fn authenticate(
     }
 }
 
-fn load_key(path: &str, passphrase: &str) -> Result<russh::keys::PrivateKey, String> {
-    let path = match path.strip_prefix("~/") {
-        Some(rest) => dirs::home_dir().unwrap_or_default().join(rest),
-        None => path.into(),
-    };
-    let text = std::fs::read_to_string(&path)
-        .map_err(|error| format!("cannot read the SSH key {}: {error}", path.display()))?;
+fn read_key(private_key: &str, passphrase: &str) -> Result<russh::keys::PrivateKey, String> {
     let passphrase = (!passphrase.is_empty()).then_some(passphrase);
-    decode_secret_key(&text, passphrase).map_err(|error| match error {
+    decode_secret_key(private_key, passphrase).map_err(|error| match error {
         russh::keys::Error::KeyIsEncrypted => {
-            "the SSH key is encrypted; enter its passphrase as the SSH password".to_string()
+            "the SSH key is encrypted; enter its passphrase".to_string()
         }
         error => format!("cannot read the SSH key: {error}"),
     })
 }
 
+/// The SHA-256 fingerprint of `private_key`. Fails unless it is an SSH
+/// private key that `passphrase` opens.
+pub fn key_fingerprint(private_key: &str, passphrase: &str) -> Result<String, String> {
+    read_key(private_key, passphrase).map(|key| key.fingerprint(HashAlg::Sha256).to_string())
+}
+
+/// Fails unless `config` is a kubeconfig.
+pub fn check_kubeconfig(config: &str) -> Result<(), String> {
+    Kubeconfig::from_yaml(config)
+        .map(drop)
+        .map_err(|error| format!("cannot read the kubeconfig: {error}"))
+}
+
 /// Forwards a local port to a pod, as `kubectl port-forward` does, with the
-/// kubeconfig saved on the connection. Nothing is read from the machine's
+/// kubeconfig the connection picked. Nothing is read from the machine's
 /// own kubeconfig or environment.
 async fn kube(record: &DbConnectionRecord, target_port: u16) -> Result<Tunnel, String> {
+    if record.kube_config.is_empty() {
+        return Err("choose a kubeconfig for this connection".to_string());
+    }
     let kubeconfig = Kubeconfig::from_yaml(&record.kube_config)
         .map_err(|error| format!("cannot read the kubeconfig: {error}"))?;
     let options = KubeConfigOptions {
@@ -357,7 +367,7 @@ fn pod_port(pod: &Pod, target: &IntOrString) -> Option<u16> {
 
 #[cfg(test)]
 mod tests {
-    use super::{open, pod_port, TUNNEL_KUBERNETES};
+    use super::{key_fingerprint, open, pod_port, TUNNEL_KUBERNETES, TUNNEL_SSH};
     use k8s_openapi::api::core::v1::{Container, ContainerPort, Pod, PodSpec};
     use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
     use shared::DbConnectionRecord;
@@ -382,6 +392,27 @@ mod tests {
         assert_eq!(pod_port(&pod, &named("postgres")), Some(5432));
         assert_eq!(pod_port(&pod, &named("metrics")), None);
         assert_eq!(pod_port(&pod, &IntOrString::Int(6432)), Some(6432));
+    }
+
+    #[tokio::test]
+    async fn a_tunnel_with_nothing_picked_says_what_to_pick() {
+        let through = |tunnel: &str| DbConnectionRecord {
+            port: 5432,
+            tunnel: tunnel.to_string(),
+            ..Default::default()
+        };
+        let error = open(&through(TUNNEL_SSH)).await.expect_err("no host");
+        assert_eq!(error, "choose an SSH host for this connection");
+        let error = open(&through(TUNNEL_KUBERNETES))
+            .await
+            .expect_err("no kubeconfig");
+        assert_eq!(error, "choose a kubeconfig for this connection");
+    }
+
+    #[test]
+    fn text_that_is_not_a_private_key_is_refused() {
+        let error = key_fingerprint("ssh-ed25519 AAAA", "").expect_err("a public key");
+        assert!(error.starts_with("cannot read the SSH key: "), "{error}");
     }
 
     #[tokio::test]

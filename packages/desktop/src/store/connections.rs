@@ -6,25 +6,39 @@ use orm::schema::{connection_groups, db_connections};
 use shared::{DbConnectionRecord, Environment, McpAccess};
 use uuid::Uuid;
 
-use super::{internal_error, run_db, DbPool};
+use super::{internal_error, run_db, tunnels, DbPool};
 
+/// Every saved connection, with what its tunnel signs in with filled in.
 pub async fn connection_list(
     pool: crate::app::State<'_, DbPool>,
 ) -> Result<Vec<DbConnectionRecord>, String> {
     let pool = pool.inner().clone();
     run_db(pool, |connection| {
-        db_connections::table
-            .order(db_connections::name.asc())
-            .load::<DbConnection>(connection)
-            .map(|rows| rows.into_iter().map(to_record).collect())
-            .map_err(internal_error)
+        (|| {
+            let hosts = tunnels::load_hosts(connection)?;
+            let keys = tunnels::load_keys(connection)?;
+            let kubeconfigs = tunnels::load_kubeconfigs(connection)?;
+            let rows = db_connections::table
+                .order(db_connections::name.asc())
+                .load::<DbConnection>(connection)?;
+            Ok(rows
+                .into_iter()
+                .map(|row| {
+                    let mut record = to_record(row);
+                    record.resolve(&hosts, &keys, &kubeconfigs);
+                    record
+                })
+                .collect())
+        })()
+        .map_err(internal_error)
     })
     .await
 }
 
 /// Creates the connection when its `id` is empty, otherwise updates it. The
 /// connection joins the group called `group_name`, which is created if it is
-/// new; an empty name leaves it ungrouped. `record.group_id` is ignored.
+/// new; an empty name leaves it ungrouped. `record.group_id` is ignored. The
+/// returned record is not resolved.
 pub async fn connection_save(
     record: DbConnectionRecord,
     group_name: String,
@@ -57,15 +71,11 @@ pub async fn connection_save(
                     mcp_update: record.mcp.update,
                     mcp_delete: record.mcp.delete,
                     tunnel: record.tunnel,
-                    ssh_host: record.ssh_host,
-                    ssh_port: record.ssh_port,
-                    ssh_user: record.ssh_user,
-                    ssh_password: record.ssh_password,
-                    ssh_key_path: record.ssh_key_path,
                     kube_context: record.kube_context,
                     kube_namespace: record.kube_namespace,
                     kube_resource: record.kube_resource,
-                    kube_config: record.kube_config,
+                    ssh_host_id: record.ssh_host_id,
+                    kubeconfig_id: record.kubeconfig_id,
                     updated_at: now,
                 };
                 let saved = if record.id.is_empty() {
@@ -163,14 +173,13 @@ fn to_record(row: DbConnection) -> DbConnectionRecord {
             delete: row.mcp_delete,
         },
         tunnel: row.tunnel,
-        ssh_host: row.ssh_host,
-        ssh_port: row.ssh_port,
-        ssh_user: row.ssh_user,
-        ssh_password: row.ssh_password,
-        ssh_key_path: row.ssh_key_path,
+        ssh_host_id: row.ssh_host_id,
+        kubeconfig_id: row.kubeconfig_id,
         kube_context: row.kube_context,
         kube_namespace: row.kube_namespace,
         kube_resource: row.kube_resource,
-        kube_config: row.kube_config,
+        // Filled in by `DbConnectionRecord::resolve`.
+        ssh: None,
+        kube_config: String::new(),
     }
 }

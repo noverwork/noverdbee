@@ -31,15 +31,21 @@ diesel::table! {
         mcp_update -> Bool,
         mcp_delete -> Bool,
         tunnel -> Text,
-        ssh_host -> Text,
-        ssh_port -> Integer,
-        ssh_user -> Text,
-        ssh_password -> Text,
-        ssh_key_path -> Text,
         kube_context -> Text,
         kube_namespace -> Text,
         kube_resource -> Text,
-        kube_config -> Text,
+        ssh_host_id -> Nullable<Text>,
+        kubeconfig_id -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    kubeconfigs (id) {
+        id -> Text,
+        name -> Text,
+        config -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
     }
 }
 
@@ -62,12 +68,44 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    ssh_hosts (id) {
+        id -> Text,
+        name -> Text,
+        host -> Text,
+        port -> Integer,
+        username -> Text,
+        password -> Text,
+        ssh_key_id -> Nullable<Text>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    ssh_keys (id) {
+        id -> Text,
+        name -> Text,
+        private_key -> Text,
+        passphrase -> Text,
+        fingerprint -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
 diesel::joinable!(db_connections -> connection_groups (group_id));
+diesel::joinable!(db_connections -> kubeconfigs (kubeconfig_id));
+diesel::joinable!(db_connections -> ssh_hosts (ssh_host_id));
+diesel::joinable!(ssh_hosts -> ssh_keys (ssh_key_id));
 diesel::joinable!(query_history -> db_connections (connection_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     connection_groups,
     db_connections,
+    kubeconfigs,
     query_history,
     settings,
+    ssh_hosts,
+    ssh_keys,
 );

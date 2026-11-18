@@ -326,3 +326,113 @@ async fn history_keeps_one_entry_per_sql_newest_first() {
         .expect("delete");
     assert!(list().await.is_empty(), "history goes with its connection");
 }
+
+#[tokio::test]
+async fn a_connection_signs_in_with_its_saved_host_key_and_kubeconfig() {
+    use super::tunnels;
+    let (app, _directory) = test_app();
+
+    let refused = tunnels::ssh_key_save(
+        shared::SshKeyRecord {
+            name: "deploy".to_string(),
+            private_key: "not a key".to_string(),
+            ..Default::default()
+        },
+        app.state(),
+    )
+    .await
+    .expect_err("not a key");
+    assert!(
+        refused.starts_with("cannot read the SSH key: "),
+        "{refused}"
+    );
+    let key = tunnels::ssh_key_save(
+        shared::SshKeyRecord {
+            name: "deploy".to_string(),
+            private_key: TEST_KEY.to_string(),
+            ..Default::default()
+        },
+        app.state(),
+    )
+    .await
+    .expect("save key");
+    assert!(
+        key.fingerprint.starts_with("SHA256:"),
+        "{}",
+        key.fingerprint
+    );
+
+    let host = tunnels::ssh_host_save(
+        shared::SshHostRecord {
+            name: " bastion ".to_string(),
+            host: "bastion.example.com".to_string(),
+            port: 22,
+            username: "ubuntu".to_string(),
+            password: "secret".to_string(),
+            ..Default::default()
+        },
+        app.state(),
+    )
+    .await
+    .expect("save host");
+    assert_eq!(host.name, "bastion");
+    let kubeconfig = tunnels::kubeconfig_save(
+        shared::KubeconfigRecord {
+            name: "staging".to_string(),
+            config: "apiVersion: v1\nkind: Config\n".to_string(),
+            ..Default::default()
+        },
+        app.state(),
+    )
+    .await
+    .expect("save kubeconfig");
+
+    super::connections::connection_save(
+        shared::DbConnectionRecord {
+            name: "orders".to_string(),
+            driver: "postgres".to_string(),
+            tunnel: "ssh".to_string(),
+            ssh_host_id: Some(host.id.clone()),
+            kubeconfig_id: Some(kubeconfig.id.clone()),
+            ..Default::default()
+        },
+        String::new(),
+        app.state(),
+    )
+    .await
+    .expect("save connection");
+    let load = || async {
+        super::connections::connection_list(app.state())
+            .await
+            .expect("list")
+            .remove(0)
+    };
+    let loaded = load().await;
+    let login = loaded.ssh.expect("the saved host");
+    assert_eq!(
+        (login.host.as_str(), login.password.as_str()),
+        ("bastion.example.com", "secret")
+    );
+    assert_eq!(loaded.kube_config, "apiVersion: v1\nkind: Config\n");
+
+    // Deleting what a connection points at leaves the connection, unpicked.
+    tunnels::ssh_host_delete(host.id, app.state())
+        .await
+        .expect("delete host");
+    tunnels::kubeconfig_delete(kubeconfig.id, app.state())
+        .await
+        .expect("delete kubeconfig");
+    let loaded = load().await;
+    assert_eq!((loaded.ssh_host_id, loaded.kubeconfig_id), (None, None));
+    assert_eq!((loaded.ssh, loaded.kube_config), (None, String::new()));
+}
+
+/// A throwaway ed25519 key, used nowhere else.
+const TEST_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----\n\
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n\
+QyNTUxOQAAACCpTZvpvPuoNC7HgY06/AlUYK3XmEsEpFzp5f1ID7MaNgAAAIgShxIPEocS\n\
+DwAAAAtzc2gtZWQyNTUxOQAAACCpTZvpvPuoNC7HgY06/AlUYK3XmEsEpFzp5f1ID7MaNg\n\
+AAAEDxOzFHYMxWIPnaZTE3tc+DX5i6pcbVoJSRPWujf5UDQalNm+m8+6g0LseBjTr8CVRg\n\
+rdeYSwSkXOnl/UgPsxo2AAAABHRlc3QB\n\
+-----END OPENSSH PRIVATE KEY-----\n\
+";

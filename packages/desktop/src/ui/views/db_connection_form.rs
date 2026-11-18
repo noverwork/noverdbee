@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::select::{Select, SelectEvent};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{h_flex, v_flex, Disableable as _, Sizable as _};
@@ -21,7 +21,6 @@ use crate::ui::theme;
 use crate::ui::views::common::{self, Choice, ChoiceSelect};
 
 const DEFAULT_PORT: i32 = 5432;
-const DEFAULT_SSH_PORT: i32 = 22;
 
 #[derive(Debug, Default, PartialEq)]
 struct Errors {
@@ -31,15 +30,13 @@ struct Errors {
     port: Option<&'static str>,
     username: Option<&'static str>,
     ssh_host: Option<&'static str>,
-    ssh_port: Option<&'static str>,
-    ssh_user: Option<&'static str>,
+    kubeconfig: Option<&'static str>,
     kube_resource: Option<&'static str>,
-    kube_config: Option<&'static str>,
 }
 
-/// Checks what the record's driver and tunnel need. `port` and `ssh_port`
-/// are the text as typed.
-fn validate(record: &DbConnectionRecord, port: &str, ssh_port: &str) -> Errors {
+/// Checks what the record's driver and tunnel need. `port` is the text as
+/// typed.
+fn validate(record: &DbConnectionRecord, port: &str) -> Errors {
     let missing = |value: &str, message: &'static str| value.trim().is_empty().then_some(message);
     let postgres = record.driver == DRIVER_POSTGRES;
     let ssh = record.tunnel == TUNNEL_SSH;
@@ -49,18 +46,10 @@ fn validate(record: &DbConnectionRecord, port: &str, ssh_port: &str) -> Errors {
             .then_some("Port must be a number from 1 to 65535")
     };
     Errors {
-        ssh_host: ssh
-            .then(|| missing(&record.ssh_host, "SSH host is required"))
-            .flatten(),
-        ssh_port: ssh.then(|| port_error(ssh_port)).flatten(),
-        ssh_user: ssh
-            .then(|| missing(&record.ssh_user, "SSH user is required"))
-            .flatten(),
+        ssh_host: (ssh && record.ssh_host_id.is_none()).then_some("Choose an SSH host"),
+        kubeconfig: (kubernetes && record.kubeconfig_id.is_none()).then_some("Choose a kubeconfig"),
         kube_resource: kubernetes
             .then(|| missing(&record.kube_resource, "Resource is required"))
-            .flatten(),
-        kube_config: kubernetes
-            .then(|| missing(&record.kube_config, "Kubeconfig is required"))
             .flatten(),
         name: missing(&record.name, "Name is required"),
         path: (!postgres)
@@ -102,15 +91,11 @@ pub struct DbConnectionForm {
     password: Entity<InputState>,
     ssl_mode: Entity<ChoiceSelect>,
     tunnel: Entity<ChoiceSelect>,
-    ssh_host: Entity<InputState>,
-    ssh_port: Entity<InputState>,
-    ssh_user: Entity<InputState>,
-    ssh_password: Entity<InputState>,
-    ssh_key_path: Entity<InputState>,
+    ssh_host: Entity<ChoiceSelect>,
+    kubeconfig: Entity<ChoiceSelect>,
     kube_context: Entity<InputState>,
     kube_namespace: Entity<InputState>,
     kube_resource: Entity<InputState>,
-    kube_config: Entity<TextareaState>,
     errors: Errors,
     error: Option<SharedString>,
     saving: bool,
@@ -145,6 +130,33 @@ impl DbConnectionForm {
             };
             (existing.unwrap_or(new), group_name)
         };
+        let (hosts, kubeconfigs) = {
+            let store = store.read(cx);
+            (
+                store
+                    .ssh_hosts
+                    .iter()
+                    .map(|host| Choice::new(host.id.clone(), host.name.clone()))
+                    .collect(),
+                store
+                    .kubeconfigs
+                    .iter()
+                    .map(|kubeconfig| Choice::new(kubeconfig.id.clone(), kubeconfig.name.clone()))
+                    .collect(),
+            )
+        };
+        let ssh_host = common::new_select(
+            hosts,
+            existing.ssh_host_id.as_deref().unwrap_or_default(),
+            window,
+            cx,
+        );
+        let kubeconfig = common::new_select(
+            kubeconfigs,
+            existing.kubeconfig_id.as_deref().unwrap_or_default(),
+            window,
+            cx,
+        );
         let driver = common::new_select(
             vec![
                 Choice::new(DRIVER_SQLITE, "SQLite"),
@@ -201,11 +213,6 @@ impl DbConnectionForm {
                     .placeholder(placeholder)
             })
         };
-        let ssh_port = if existing.ssh_port > 0 {
-            existing.ssh_port
-        } else {
-            DEFAULT_SSH_PORT
-        };
         let port = if existing.port > 0 {
             existing.port
         } else {
@@ -220,10 +227,6 @@ impl DbConnectionForm {
             port: input(port.to_string(), "5432"),
             database: input(existing.database, "postgres"),
             username: input(existing.username, "postgres"),
-            ssh_host: input(existing.ssh_host, "bastion.example.com"),
-            ssh_port: input(ssh_port.to_string(), "22"),
-            ssh_user: input(existing.ssh_user, "ubuntu"),
-            ssh_key_path: input(existing.ssh_key_path, "~/.ssh/id_ed25519"),
             kube_context: input(existing.kube_context, "current-context"),
             kube_namespace: input(existing.kube_namespace, "default"),
             kube_resource: input(existing.kube_resource, "svc/postgres"),
@@ -232,17 +235,8 @@ impl DbConnectionForm {
                     .masked(true)
                     .default_value(existing.password)
             }),
-            kube_config: cx.new(|cx| {
-                TextareaState::new(window, cx)
-                    .rows(6)
-                    .default_value(existing.kube_config)
-                    .placeholder("apiVersion: v1\nkind: Config\n...")
-            }),
-            ssh_password: cx.new(|cx| {
-                InputState::new(window, cx)
-                    .masked(true)
-                    .default_value(existing.ssh_password)
-            }),
+            ssh_host,
+            kubeconfig,
             tunnel,
             read_only: existing.read_only,
             mcp: existing.mcp,
@@ -262,7 +256,8 @@ impl DbConnectionForm {
         common::selected(&self.driver, cx).as_deref() == Some(DRIVER_POSTGRES)
     }
 
-    /// The record the fields describe; fields of the other driver stay empty.
+    /// The record the fields describe, with what its tunnel signs in with
+    /// filled in; fields of the other driver stay empty.
     fn record(&self, cx: &App) -> DbConnectionRecord {
         let text = |input: &Entity<InputState>| input.read(cx).value().trim().to_string();
         let shared = DbConnectionRecord {
@@ -281,29 +276,15 @@ impl DbConnectionForm {
             let kubernetes = tunnel == TUNNEL_KUBERNETES;
             let when =
                 |on: bool, input: &Entity<InputState>| if on { text(input) } else { String::new() };
-            DbConnectionRecord {
+            let mut record = DbConnectionRecord {
                 driver: DRIVER_POSTGRES.to_string(),
-                ssh_host: when(ssh, &self.ssh_host),
-                ssh_port: if ssh {
-                    text(&self.ssh_port).parse().unwrap_or(0)
-                } else {
-                    DEFAULT_SSH_PORT
-                },
-                ssh_user: when(ssh, &self.ssh_user),
-                ssh_password: if ssh {
-                    self.ssh_password.read(cx).value().to_string()
-                } else {
-                    String::new()
-                },
-                ssh_key_path: when(ssh, &self.ssh_key_path),
+                ssh_host_id: ssh.then(|| common::selected(&self.ssh_host, cx)).flatten(),
+                kubeconfig_id: kubernetes
+                    .then(|| common::selected(&self.kubeconfig, cx))
+                    .flatten(),
                 kube_context: when(kubernetes, &self.kube_context),
                 kube_namespace: when(kubernetes, &self.kube_namespace),
                 kube_resource: when(kubernetes, &self.kube_resource),
-                kube_config: if kubernetes {
-                    self.kube_config.read(cx).value().trim().to_string()
-                } else {
-                    String::new()
-                },
                 tunnel,
                 host: when(!kubernetes, &self.host),
                 port: text(&self.port).parse().unwrap_or(0),
@@ -313,7 +294,10 @@ impl DbConnectionForm {
                 password: self.password.read(cx).value().to_string(),
                 ssl_mode: common::selected(&self.ssl_mode, cx).unwrap_or_default(),
                 ..shared
-            }
+            };
+            let store = self.store.read(cx);
+            record.resolve(&store.ssh_hosts, &store.ssh_keys, &store.kubeconfigs);
+            record
         } else {
             DbConnectionRecord {
                 driver: DRIVER_SQLITE.to_string(),
@@ -325,11 +309,7 @@ impl DbConnectionForm {
 
     /// Checks the fields; `false` when the form cannot be used yet.
     fn check(&mut self, cx: &mut Context<Self>) -> bool {
-        self.errors = validate(
-            &self.record(cx),
-            &self.port.read(cx).value(),
-            &self.ssh_port.read(cx).value(),
-        );
+        self.errors = validate(&self.record(cx), &self.port.read(cx).value());
         cx.notify();
         self.errors == Errors::default()
     }
@@ -551,43 +531,35 @@ impl DbConnectionForm {
             Select::new(&self.tunnel),
             None,
         ));
+        // What to pick from, or where to add the first one.
+        let pick = |label: SharedString,
+                    select: &Entity<ChoiceSelect>,
+                    error: Option<&'static str>,
+                    none_saved: Option<SharedString>| {
+            common::field(label, Select::new(select), error.map(t)).children(
+                none_saved.map(|hint| div().text_xs().text_color(theme::STENCIL_MUTE).child(hint)),
+            )
+        };
+        let store = self.store.read(cx);
         match tunnel.as_str() {
-            TUNNEL_SSH => section
-                .child(
-                    h_flex()
-                        .items_start()
-                        .gap_3()
-                        .child(div().flex_1().min_w_0().child(common::field(
-                            t("SSH host"),
-                            Input::new(&self.ssh_host),
-                            self.errors.ssh_host.map(t),
-                        )))
-                        .child(div().w_32().child(common::field(
-                            t("Port"),
-                            Input::new(&self.ssh_port),
-                            self.errors.ssh_port.map(t),
-                        ))),
-                )
-                .child(common::field(
-                    t("SSH user"),
-                    Input::new(&self.ssh_user),
-                    self.errors.ssh_user.map(t),
-                ))
-                .child(common::field(
-                    t("Private key"),
-                    Input::new(&self.ssh_key_path),
-                    None,
-                ))
-                .child(common::field(
-                    t("Password or key passphrase"),
-                    Input::new(&self.ssh_password).mask_toggle(),
-                    None,
-                )),
+            TUNNEL_SSH => section.child(pick(
+                t("SSH host"),
+                &self.ssh_host,
+                self.errors.ssh_host,
+                store
+                    .ssh_hosts
+                    .is_empty()
+                    .then(|| t("No SSH hosts saved yet. Add one on the SSH Hosts page.")),
+            )),
             TUNNEL_KUBERNETES => section
-                .child(common::field(
+                .child(pick(
                     t("Kubeconfig"),
-                    Textarea::new(&self.kube_config),
-                    self.errors.kube_config.map(t),
+                    &self.kubeconfig,
+                    self.errors.kubeconfig,
+                    store
+                        .kubeconfigs
+                        .is_empty()
+                        .then(|| t("No kubeconfigs saved yet. Add one on the Kubeconfigs page.")),
                 ))
                 .child(common::field(
                     t("Context"),
@@ -736,13 +708,13 @@ mod tests {
             path: "/tmp/a.db".to_string(),
             ..Default::default()
         };
-        assert_eq!(validate(&sqlite, "", ""), Errors::default());
+        assert_eq!(validate(&sqlite, ""), Errors::default());
         let blank = DbConnectionRecord {
             driver: DRIVER_SQLITE.to_string(),
             ..Default::default()
         };
         assert_eq!(
-            validate(&blank, "5432", ""),
+            validate(&blank, "5432"),
             Errors {
                 name: Some("Name is required"),
                 path: Some("Choose a database file"),
@@ -757,7 +729,7 @@ mod tests {
             username: "app".to_string(),
             ..Default::default()
         };
-        assert_eq!(validate(&postgres, "5432", ""), Errors::default());
+        assert_eq!(validate(&postgres, "5432"), Errors::default());
         let incomplete = DbConnectionRecord {
             host: " ".to_string(),
             username: String::new(),
@@ -765,7 +737,7 @@ mod tests {
         };
         for port in ["", "0", "70000", "abc"] {
             assert_eq!(
-                validate(&incomplete, port, ""),
+                validate(&incomplete, port),
                 Errors {
                     host: Some("Host is required"),
                     port: Some("Port must be a number from 1 to 65535"),
@@ -791,20 +763,17 @@ mod tests {
             ..postgres.clone()
         };
         assert_eq!(
-            validate(&ssh, "5432", "0"),
+            validate(&ssh, "5432"),
             Errors {
-                ssh_host: Some("SSH host is required"),
-                ssh_port: Some("Port must be a number from 1 to 65535"),
-                ssh_user: Some("SSH user is required"),
+                ssh_host: Some("Choose an SSH host"),
                 ..Errors::default()
             }
         );
         let ssh = DbConnectionRecord {
-            ssh_host: "bastion".to_string(),
-            ssh_user: "ubuntu".to_string(),
+            ssh_host_id: Some("bastion".to_string()),
             ..ssh
         };
-        assert_eq!(validate(&ssh, "5432", "22"), Errors::default());
+        assert_eq!(validate(&ssh, "5432"), Errors::default());
 
         let kubernetes = DbConnectionRecord {
             host: String::new(),
@@ -812,10 +781,10 @@ mod tests {
             ..postgres
         };
         assert_eq!(
-            validate(&kubernetes, "5432", ""),
+            validate(&kubernetes, "5432"),
             Errors {
                 kube_resource: Some("Resource is required"),
-                kube_config: Some("Kubeconfig is required"),
+                kubeconfig: Some("Choose a kubeconfig"),
                 ..Errors::default()
             }
         );

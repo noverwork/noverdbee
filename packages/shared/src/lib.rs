@@ -68,23 +68,100 @@ pub struct DbConnectionRecord {
     pub read_only: bool,
     pub environment: Environment,
     pub mcp: McpAccess,
-    /// Empty connects directly, `ssh` goes through an SSH server, `kubernetes` to a
-    /// pod in a cluster. `host` and `port` are the target either way;
-    /// kubernetes has no `host`.
+    /// Empty connects directly, `ssh` goes through the saved SSH host, `kubernetes`
+    /// to a pod in the saved kubeconfig's cluster. `host` and `port` are the
+    /// target either way; kubernetes has no `host`.
     pub tunnel: String,
-    pub ssh_host: String,
-    pub ssh_port: i32,
-    pub ssh_user: String,
-    /// The SSH password, or the key's passphrase when a key is set.
-    pub ssh_password: String,
-    pub ssh_key_path: String,
+    pub ssh_host_id: Option<String>,
+    pub kubeconfig_id: Option<String>,
     /// The kubeconfig context; empty uses its current context.
     pub kube_context: String,
     pub kube_namespace: String,
     /// What to forward to, such as `svc/postgres` or `pod/db-0`.
     pub kube_resource: String,
-    /// The kubeconfig the Kubernetes tunnel signs in with, as YAML.
+    /// The SSH host with its key, looked up by [`Self::resolve`]; not saved.
+    pub ssh: Option<SshLogin>,
+    /// The kubeconfig's YAML, looked up by [`Self::resolve`]; not saved.
     pub kube_config: String,
+}
+
+impl DbConnectionRecord {
+    /// Fills in what the tunnel signs in with from the saved host, its key
+    /// and the saved kubeconfig this connection points at.
+    pub fn resolve(
+        &mut self,
+        hosts: &[SshHostRecord],
+        keys: &[SshKeyRecord],
+        kubeconfigs: &[KubeconfigRecord],
+    ) {
+        self.ssh = hosts
+            .iter()
+            .find(|host| Some(&host.id) == self.ssh_host_id.as_ref())
+            .map(|host| {
+                let key = keys
+                    .iter()
+                    .find(|key| Some(&key.id) == host.key_id.as_ref());
+                SshLogin {
+                    host: host.host.clone(),
+                    port: host.port,
+                    username: host.username.clone(),
+                    password: host.password.clone(),
+                    private_key: key.map(|key| key.private_key.clone()).unwrap_or_default(),
+                    passphrase: key.map(|key| key.passphrase.clone()).unwrap_or_default(),
+                }
+            });
+        self.kube_config = kubeconfigs
+            .iter()
+            .find(|kubeconfig| Some(&kubeconfig.id) == self.kubeconfig_id.as_ref())
+            .map(|kubeconfig| kubeconfig.config.clone())
+            .unwrap_or_default();
+    }
+}
+
+/// A saved SSH private key. `id` is empty until it has been saved.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SshKeyRecord {
+    pub id: String,
+    pub name: String,
+    pub private_key: String,
+    /// Empty when the key is not encrypted.
+    pub passphrase: String,
+    /// The key's SHA-256 fingerprint, set when it is saved.
+    pub fingerprint: String,
+}
+
+/// A saved SSH server that connections tunnel through. `id` is empty until
+/// it has been saved.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SshHostRecord {
+    pub id: String,
+    pub name: String,
+    pub host: String,
+    pub port: i32,
+    pub username: String,
+    /// Tried after the key, or alone when there is no key.
+    pub password: String,
+    pub key_id: Option<String>,
+}
+
+/// A saved kubeconfig, as YAML. `id` is empty until it has been saved.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KubeconfigRecord {
+    pub id: String,
+    pub name: String,
+    pub config: String,
+}
+
+/// What an SSH tunnel signs in with: a saved host and its key.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SshLogin {
+    pub host: String,
+    pub port: i32,
+    pub username: String,
+    pub password: String,
+    /// Empty signs in with the password alone.
+    pub private_key: String,
+    pub passphrase: String,
 }
 
 /// The MCP tools AI clients may use on a connection. All off keeps the
