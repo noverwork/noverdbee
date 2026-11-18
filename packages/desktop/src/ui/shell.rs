@@ -201,26 +201,35 @@ impl Shell {
         h_flex()
             .h_9()
             .flex_shrink_0()
-            .px_2()
             .bg(theme::RIB)
+            .border_b_1()
+            .border_color(theme::RIB)
             .child(page_label(label, icon))
     }
 }
 
-/// The outlined cell at the left of the top bar that names the page.
+/// The cell at the left of the top bar that names the page, as in noverterm.
 pub fn page_label(label: SharedString, icon: &'static str) -> Div {
     h_flex()
-        .h_7()
+        .h_full()
         .flex_shrink_0()
-        .gap_2()
-        .px_2p5()
-        .rounded(theme::RADIUS)
-        .border_1()
-        .border_color(theme::STENCIL)
-        .text_size(px(11.))
-        .text_color(theme::STENCIL)
-        .child(lucide(icon).size_3p5().text_color(theme::STENCIL_DIM))
-        .child(SharedString::from(label.to_uppercase()))
+        .px_2()
+        .bg(theme::RAIL)
+        .border_r_1()
+        .border_color(theme::RIB)
+        .child(
+            h_flex()
+                .h_7()
+                .gap_2()
+                .px_2p5()
+                .rounded(theme::RADIUS)
+                .border_1()
+                .border_color(theme::STENCIL)
+                .text_size(px(11.))
+                .text_color(theme::STENCIL)
+                .child(lucide(icon).size_3p5().text_color(theme::STENCIL_DIM))
+                .child(SharedString::from(label.to_uppercase())),
+        )
 }
 
 /// A 40x28 icon button in the sidebar rail.

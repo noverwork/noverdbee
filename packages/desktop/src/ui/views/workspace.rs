@@ -530,16 +530,20 @@ impl Workspace {
             .h_9()
             .flex_shrink_0()
             .gap_1()
-            .px_2()
+            .pr_2()
             .bg(theme::RIB)
+            .border_b_1()
+            .border_color(theme::RIB)
             .child(page_label(t("Databases"), "database"))
             .child(
                 h_flex()
                     .id("tabs")
+                    .h_full()
                     .flex_1()
                     .min_w_0()
                     .gap_1()
-                    .pl_1()
+                    // With the strip's gap, the first tab sits 6px from the cell, as in noverterm.
+                    .pl_0p5()
                     .overflow_x_scroll()
                     .children(self.tabs.iter().map(|tab| self.render_tab(tab, cx))),
             )
