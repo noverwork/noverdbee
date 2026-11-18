@@ -57,6 +57,13 @@ pub fn open_main_window(options: WindowOptions, cx: &mut App) -> Result<AnyWindo
     Ok(window)
 }
 
+/// The macOS menu bar. Set again when the language changes.
+pub fn set_menus(cx: &mut App) {
+    cx.set_menus([
+        Menu::new("noverdbee").items([MenuItem::action(i18n::t("Quit noverdbee"), shell::Quit)])
+    ]);
+}
+
 pub fn run(app: AppHandle) {
     gpui_kit::application().with_assets(Assets).run(move |cx| {
         init(app, cx);
@@ -80,9 +87,7 @@ pub fn run(app: AppHandle) {
         })
         .detach();
         cx.on_action(|_: &shell::Quit, cx| cx.quit());
-        cx.set_menus([
-            Menu::new("noverdbee").items([MenuItem::action("Quit noverdbee", shell::Quit)])
-        ]);
+        set_menus(cx);
         cx.activate(true);
     });
 }
