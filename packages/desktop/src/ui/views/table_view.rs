@@ -479,6 +479,8 @@ pub struct TableView {
     order: Option<(usize, Direction)>,
     loading: bool,
     saving: bool,
+    /// Whether the connection was read-only when the grid was built.
+    read_only: bool,
     error: Option<SharedString>,
     structure: Vec<Section>,
     section: usize,
@@ -503,17 +505,27 @@ impl TableView {
     ) -> Self {
         let filter =
             cx.new(|cx| InputState::new(window, cx).placeholder(t("condition, e.g. id > 100")));
-        let _subscriptions = vec![cx.subscribe_in(
-            &filter,
-            window,
-            |this, _, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.reload(window, cx);
+        let store = store(cx);
+        let _subscriptions = vec![
+            cx.subscribe_in(
+                &filter,
+                window,
+                |this, _, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::PressEnter { .. }) {
+                        this.reload(window, cx);
+                    }
+                },
+            ),
+            // The grid decides what can be edited when it is built; build it
+            // again when the connection is switched to or from read-only.
+            cx.observe_in(&store, window, |this, _, window, cx| {
+                if this.read_only(cx) != this.read_only {
+                    this.load(Load::Replace, window, cx);
                 }
-            },
-        )];
+            }),
+        ];
         let mut view = Self {
-            store: store(cx),
+            store,
             connection,
             info,
             mode: Mode::Data,
@@ -522,6 +534,7 @@ impl TableView {
             order: None,
             loading: false,
             saving: false,
+            read_only: false,
             error: None,
             structure: Vec::new(),
             section: 0,
@@ -657,7 +670,8 @@ impl TableView {
         }
         // Views and tables without a primary key cannot be edited: there is
         // no way to say which row a change belongs to.
-        let key = if self.info.kind == ObjectKind::Table && !self.read_only(cx) {
+        self.read_only = self.read_only(cx);
+        let key = if self.info.kind == ObjectKind::Table && !self.read_only {
             page.columns
                 .iter()
                 .enumerate()
