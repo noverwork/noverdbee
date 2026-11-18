@@ -185,5 +185,7 @@
  "SSH host is required": "請輸入 SSH 主機",
  "SSH user is required": "請輸入 SSH 使用者",
  "Resource is required": "請輸入資源",
- "Quit noverdbee": "結束 noverdbee"
+ "Quit noverdbee": "結束 noverdbee",
+ "Kubeconfig": "Kubeconfig",
+ "Kubeconfig is required": "請貼上 kubeconfig"
 }

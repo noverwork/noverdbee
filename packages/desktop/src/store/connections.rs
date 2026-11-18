@@ -65,6 +65,7 @@ pub async fn connection_save(
                     kube_context: record.kube_context,
                     kube_namespace: record.kube_namespace,
                     kube_resource: record.kube_resource,
+                    kube_config: record.kube_config,
                     updated_at: now,
                 };
                 let saved = if record.id.is_empty() {
@@ -170,5 +171,6 @@ fn to_record(row: DbConnection) -> DbConnectionRecord {
         kube_context: row.kube_context,
         kube_namespace: row.kube_namespace,
         kube_resource: row.kube_resource,
+        kube_config: row.kube_config,
     }
 }

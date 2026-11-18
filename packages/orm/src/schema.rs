@@ -39,6 +39,7 @@ diesel::table! {
         kube_context -> Text,
         kube_namespace -> Text,
         kube_resource -> Text,
+        kube_config -> Text,
     }
 }
 
