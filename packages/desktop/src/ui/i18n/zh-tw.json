@@ -119,7 +119,6 @@
  "SSL mode": "SSL 模式",
  "Database type": "資料庫類型",
  "MCP": "MCP",
- "AI access (MCP)": "AI 存取 (MCP)",
  "All off hides this connection from AI clients.": "全部關閉則不對 AI 開放。",
  "Regenerate": "重新產生",
  "Apply": "套用",

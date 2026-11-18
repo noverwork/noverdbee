@@ -331,7 +331,7 @@ impl Render for SshHostForm {
         common::form_page(
             self.error.clone(),
             v_flex()
-                .gap_5()
+                .gap_4()
                 .child(
                     common::form_section(None, None)
                         .child(common::field(

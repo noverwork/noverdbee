@@ -73,9 +73,8 @@ pub fn form_page(
                 .overflow_y_scroll()
                 .child(
                     v_flex()
-                        .gap_5()
-                        // Level with the drawer's title and close button.
-                        .px_4()
+                        .gap_4()
+                        .px_6()
                         .py_4()
                         .children(error.map(error_banner))
                         .child(fields),
@@ -86,8 +85,9 @@ pub fn form_page(
                 .flex_shrink_0()
                 .justify_end()
                 .gap_2()
-                .px_4()
+                .px_6()
                 .py_4()
+                .bg(theme::PORT)
                 .border_t_1()
                 .border_color(theme::hairline())
                 .child(footer),
@@ -120,56 +120,24 @@ pub fn form_buttons(
         )
 }
 
-/// A group of fields under a title, with a rule over it. Add the fields with
-/// `child`. Pass no title for the first group, which the drawer title already
-/// names; it gets no rule either.
-#[derive(IntoElement)]
-pub struct FormSection {
-    title: Option<SharedString>,
-    hint: Option<SharedString>,
-    fields: Vec<AnyElement>,
-}
-
-pub fn form_section(
-    title: impl Into<Option<SharedString>>,
-    hint: Option<SharedString>,
-) -> FormSection {
-    FormSection {
-        title: title.into(),
-        hint,
-        fields: Vec::new(),
-    }
-}
-
-impl ParentElement for FormSection {
-    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
-        self.fields.extend(elements);
-    }
-}
-
-impl RenderOnce for FormSection {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        let fields = v_flex().gap_4().children(self.fields);
-        let Some(title) = self.title else {
-            return fields;
-        };
-        v_flex()
-            .gap_4()
-            .pt_5()
-            .border_t_1()
-            .border_color(theme::hairline())
-            .child(
-                v_flex()
-                    .gap_1()
-                    .child(div().text_sm().child(title))
-                    .children(
-                        self.hint.map(|hint| {
-                            div().text_xs().text_color(theme::STENCIL_MUTE).child(hint)
-                        }),
-                    ),
-            )
-            .child(fields)
-    }
+/// A rib card holding a group of fields, under a title when the group needs
+/// one. Pass no title for a group the drawer title or its fields already name.
+pub fn form_section(title: impl Into<Option<SharedString>>, hint: Option<SharedString>) -> Div {
+    v_flex()
+        .gap_4()
+        .p_4()
+        .rounded(theme::RADIUS)
+        .border_1()
+        .border_color(theme::hairline())
+        .bg(theme::RIB)
+        .children(title.into().map(|title| {
+            v_flex()
+                .gap_1()
+                .child(div().text_sm().child(title))
+                .children(
+                    hint.map(|hint| div().text_xs().text_color(theme::STENCIL_MUTE).child(hint)),
+                )
+        }))
 }
 
 /// Two fields side by side, each taking half the row.

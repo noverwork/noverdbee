@@ -472,7 +472,7 @@ impl DbConnectionForm {
             })
     }
 
-    fn render_server(&self, cx: &App) -> common::FormSection {
+    fn render_server(&self, cx: &App) -> Div {
         let kubernetes = common::selected(&self.tunnel, cx).as_deref() == Some(TUNNEL_KUBERNETES);
         let address = if kubernetes {
             // The tunnel's resource names the pod; only the port is needed.
@@ -519,7 +519,7 @@ impl DbConnectionForm {
 
 impl DbConnectionForm {
     /// How to reach the server: directly, through SSH, or a Kubernetes pod.
-    fn render_tunnel(&self, cx: &App) -> common::FormSection {
+    fn render_tunnel(&self, cx: &App) -> Div {
         let tunnel = common::selected(&self.tunnel, cx).unwrap_or_default();
         let through = common::field(t("Connect through"), Select::new(&self.tunnel), None);
         let section = common::form_section(t("Tunnel"), None);
@@ -573,7 +573,7 @@ impl DbConnectionForm {
     }
 
     /// Which MCP tools AI clients may use here; all off keeps it out of MCP.
-    fn render_mcp(&self, cx: &Context<Self>) -> common::FormSection {
+    fn render_mcp(&self, cx: &Context<Self>) -> Div {
         type Flag = fn(&mut McpAccess) -> &mut bool;
         let tools: [(&'static str, Flag); 4] = [
             ("select", |access| &mut access.select),
@@ -584,7 +584,7 @@ impl DbConnectionForm {
         let mut mcp = self.mcp;
         let read_only = self.read_only;
         common::form_section(
-            t("AI access (MCP)"),
+            t("MCP"),
             Some(t("All off hides this connection from AI clients.")),
         )
         .child(h_flex().gap_6().children(tools.map(|(name, flag)| {
@@ -636,7 +636,7 @@ impl Render for DbConnectionForm {
         common::form_page(
             self.error.clone(),
             v_flex()
-                .gap_5()
+                .gap_4()
                 .child(connection)
                 // The tunnel decides which address fields the server asks for.
                 .when(postgres, |form| {
