@@ -205,8 +205,7 @@ impl KubeconfigForm {
     }
 
     fn back(&mut self, cx: &mut Context<Self>) {
-        self.store
-            .update(cx, |store, cx| store.navigate(Route::Kubeconfigs, cx));
+        self.store.update(cx, |store, cx| store.close_form(cx));
     }
 
     fn save(&mut self, cx: &mut Context<Self>) {
@@ -258,27 +257,19 @@ impl Render for KubeconfigForm {
         };
 
         common::form_page(
-            if editing {
-                t("Edit kubeconfig")
-            } else {
-                t("New kubeconfig")
-            },
             self.error.clone(),
             v_flex()
                 .gap_4()
-                .child(
-                    common::form_section("ship-wheel", t("Kubeconfig identity"), None).child(
-                        common::field(
-                            t("Kubeconfig name"),
-                            Input::new(&self.name).disabled(saving),
-                            None,
-                        ),
-                    ),
-                )
-                .child(
-                    common::form_section("ship-wheel", t("Kubeconfig"), None)
-                        .child(Textarea::new(&self.config).disabled(saving)),
-                ),
+                .child(common::field(
+                    t("Name"),
+                    Input::new(&self.name).disabled(saving),
+                    None,
+                ))
+                .child(common::field(
+                    t("Kubeconfig"),
+                    Textarea::new(&self.config).disabled(saving),
+                    None,
+                )),
             common::form_buttons(
                 submit_label,
                 saving,

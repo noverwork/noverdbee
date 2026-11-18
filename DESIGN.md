@@ -199,7 +199,7 @@ Night-port slate and off-white stencil paint, with four freight line colours and
 **Character:** One semibold monospace face for chrome, SQL, and data alike, so the chrome reads as part of the same machine. Hierarchy comes from size and from tracked caps, not from a second family or weight.
 
 ### Hierarchy
-- **Headline** (600, 24px, tracking -0.025em): the page title of each full-page view (Settings, the connection form).
+- **Headline** (600, 24px, tracking -0.025em): the page title of each full-page view (Settings, SSH Hosts, Keys).
 - **Title** (600, 20px, tracking -0.025em): dialog and overlay titles.
 - **Body** (600, 14px): SQL in the editor, descriptions, list rows, field text.
 - **Body Small** (600, 12px): tree rows, grid cells, and metadata such as column types.
@@ -216,9 +216,11 @@ Night-port slate and off-white stencil paint, with four freight line colours and
 
 A fixed shell frames every view: a 56px rail on the left (logo cell, icon nav items at 40x28, settings at the foot), a navigator panel beside it (240px by default, draggable between 200px and 400px, collapsible), a 36px corrugated top bar (a page-label cell on rail, then workspace tabs), the content area, and a 24px status line at the bottom on rail with a rib top rule.
 
-Workspace tabs are 28px tall, flex between 176px and 240px, and sit 4px apart with 6px inset from the strip's ends; when the strip overflows it scrolls horizontally with chevron edge indicators. Every tab has identical anatomy: code at left, title after it, state shape at right, a close control that appears on hover or when active. While a full-page view (settings, a form) is open, the navigator hides and the tab strip drops to 45% opacity and returns on hover.
+Workspace tabs are 28px tall, flex between 176px and 240px, and sit 4px apart with 6px inset from the strip's ends; when the strip overflows it scrolls horizontally with chevron edge indicators. Every tab has identical anatomy: code at left, title after it, state shape at right, a close control that appears on hover or when active. While a full-page view (settings, a list page) is open, the navigator hides and the tab strip drops to 45% opacity and returns on hover.
 
 An editor tab splits vertically: a 32px toolbar, the editor on ink with 14px padding, a draggable 1px splitter, then the result pane with its own 24px footer. Tree rows and grid rows are 24px tall. Full-page views are padded 20px (32px from the lg breakpoint) and separate their header from content with a 1px hairline rule and 20px of space. Fields are 44px tall. Density is high; spacing follows a 4px step.
+
+Add and edit forms open in a drawer on the right, over the page they were opened from: 560px wide, 640px for the connection form. The drawer sits on port with a hairline left edge and no shadow; its title and close control are at the top, the fields scroll, and Cancel and Save stay at the foot above a hairline. Esc, Cancel, Save, and the close control shut it; a click outside does not. Fields and buttons are inset 16px, level with the title.
 
 ## Elevation & Depth
 
@@ -253,6 +255,9 @@ Solid, square, and blunt.
 - **Shadow Strategy:** none (see Elevation & Depth).
 - **Border:** 1px hairline; seal at 60% for disconnected and error panels, ochre at 60% for warning and pending-change panels.
 - **Internal Padding:** 24-32px for dialogs and overlays, with a footer band on port separated by a hairline.
+
+### Form Sections
+A form is one column of fields. Related short fields share a row (host and port, user and password). A group that needs a name has its title in body above its fields and a hairline over it; the first group has no title, because the drawer title already names it. No cards, no icons. A hint appears under a section title only when it changes a decision.
 
 ### Inputs / Fields
 - **Style:** 44px tall, rail fill, hairline edge, 2px corner, stencil text, stencil-faint placeholder. Inline fields in toolbars and the navigator filter are 24px tall with the same treatment.

@@ -18,6 +18,7 @@ pub mod workspace;
 
 use gpui_kit::*;
 
+use crate::ui::i18n::t;
 use crate::ui::store::Route;
 
 /// Builds the page for `route`. The Databases page is not built here: the
@@ -58,6 +59,27 @@ pub fn build(route: &Route, window: &mut Window, cx: &mut App) -> AnyView {
         Route::Mcp => cx.new(|cx| mcp::McpView::new(window, cx)).into(),
         Route::Settings => cx.new(|cx| settings::SettingsView::new(window, cx)).into(),
     }
+}
+
+/// The drawer title and width for a form route.
+pub fn form_frame(route: &Route) -> (SharedString, Pixels) {
+    let new_or_edit = |id: &Option<String>, new: &'static str, edit: &'static str| {
+        if id.is_some() {
+            edit
+        } else {
+            new
+        }
+    };
+    // The connection form puts fields side by side and needs the room.
+    let (title, width) = match route {
+        Route::ConnectionForm(id) => (new_or_edit(id, "New connection", "Edit connection"), 640.),
+        Route::NewConnectionIn(_) => ("New connection", 640.),
+        Route::SshHostForm(id) => (new_or_edit(id, "New SSH host", "Edit SSH host"), 560.),
+        Route::SshKeyForm(id) => (new_or_edit(id, "New SSH key", "Edit SSH key"), 560.),
+        Route::KubeconfigForm(id) => (new_or_edit(id, "New kubeconfig", "Edit kubeconfig"), 560.),
+        _ => ("", 560.),
+    };
+    (t(title), px(width))
 }
 
 /// Starts the update check that lives for the whole window.

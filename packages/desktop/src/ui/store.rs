@@ -31,9 +31,25 @@ pub enum Route {
     Settings,
 }
 
+impl Route {
+    /// Forms open in a drawer over the current page instead of replacing it.
+    pub fn is_form(&self) -> bool {
+        matches!(
+            self,
+            Route::ConnectionForm(_)
+                | Route::NewConnectionIn(_)
+                | Route::SshHostForm(_)
+                | Route::SshKeyForm(_)
+                | Route::KubeconfigForm(_)
+        )
+    }
+}
+
 pub struct Store {
     app: AppHandle,
     pub route: Route,
+    /// The form open in the drawer, if any.
+    pub form: Option<Route>,
     pub loading: bool,
     pub load_error: Option<String>,
     pub groups: Vec<GroupRecord>,
@@ -62,6 +78,7 @@ impl Store {
         let mut store = Self {
             app,
             route: Route::Databases,
+            form: None,
             loading: true,
             load_error: None,
             groups: Vec::new(),
@@ -80,9 +97,21 @@ impl Store {
         self.app.clone()
     }
 
+    /// Shows a page, or opens a form in the drawer over the current page.
     pub fn navigate(&mut self, route: Route, cx: &mut Context<Self>) {
-        self.route = route;
+        if route.is_form() {
+            self.form = Some(route);
+        } else {
+            self.route = route;
+            self.form = None;
+        }
         cx.notify();
+    }
+
+    pub fn close_form(&mut self, cx: &mut Context<Self>) {
+        if self.form.take().is_some() {
+            cx.notify();
+        }
     }
 
     // --- Saved data ---------------------------------------------------------
