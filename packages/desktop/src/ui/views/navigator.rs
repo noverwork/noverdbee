@@ -154,6 +154,11 @@ impl Navigator {
         navigator
     }
 
+    pub fn focus_filter(&self, window: &mut Window, cx: &mut App) {
+        self.filter
+            .update(cx, |filter, cx| filter.focus(window, cx));
+    }
+
     pub fn state(&self, connection: &str) -> Option<&ConnectionState> {
         self.states.get(connection)
     }

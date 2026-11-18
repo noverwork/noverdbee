@@ -16,9 +16,36 @@ use crate::ui::shell::page_label;
 use crate::ui::stencil;
 use crate::ui::store::{store, Route, Store};
 use crate::ui::theme;
+use crate::ui::views::common;
 use crate::ui::views::navigator::{state_shape, ConnectionState, Navigator, NavigatorEvent};
 use crate::ui::views::sql_editor::SqlEditor;
 use crate::ui::views::table_view::TableView;
+
+actions!(
+    noverdbee,
+    [NewEditor, CloseTab, NextTab, PreviousTab, FilterTables]
+);
+
+pub fn bind_keys(cx: &mut App) {
+    // Cmd on macOS; Ctrl elsewhere.
+    let modifier = if cfg!(target_os = "macos") {
+        "cmd"
+    } else {
+        "ctrl"
+    };
+    let key = |keys: &str| format!("{modifier}-{keys}").leak() as &str;
+    cx.bind_keys([
+        KeyBinding::new(key("t"), NewEditor, Some(CONTEXT)),
+        KeyBinding::new(key("w"), CloseTab, Some(CONTEXT)),
+        KeyBinding::new(key("shift-]"), NextTab, Some(CONTEXT)),
+        KeyBinding::new(key("shift-["), PreviousTab, Some(CONTEXT)),
+        KeyBinding::new("ctrl-tab", NextTab, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-tab", PreviousTab, Some(CONTEXT)),
+        KeyBinding::new(key("p"), FilterTables, Some(CONTEXT)),
+    ]);
+}
+
+const CONTEXT: &str = "Workspace";
 
 enum TabView {
     Editor(Entity<SqlEditor>),
@@ -62,6 +89,8 @@ pub struct Workspace {
     active: Option<usize>,
     next_tab: usize,
     queries: usize,
+    /// Keeps the shortcuts working when no tab holds the focus.
+    focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -111,6 +140,7 @@ impl Workspace {
             active: None,
             next_tab: 0,
             queries: 0,
+            focus: cx.focus_handle(),
             _subscriptions,
         }
     }
@@ -194,7 +224,31 @@ impl Workspace {
         cx.notify();
     }
 
-    fn close(&mut self, id: usize, cx: &mut Context<Self>) {
+    /// Closes a tab, asking first when it holds edits that are not saved.
+    fn request_close(&mut self, id: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let pending = self.tabs.iter().any(|tab| {
+            tab.id == id
+                && matches!(&tab.view, TabView::Table(view) if view.read(cx).pending(cx) > 0)
+        });
+        if !pending {
+            self.close(id, window, cx);
+            return;
+        }
+        let workspace = cx.weak_entity();
+        common::confirm_delete(
+            t("Discard changes?"),
+            t("Closing the tab drops the changes that have not been saved."),
+            None,
+            t("Discard"),
+            window,
+            cx,
+            move |window, cx| {
+                let _ = workspace.update(cx, |this, cx| this.close(id, window, cx));
+            },
+        );
+    }
+
+    fn close(&mut self, id: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.tabs.iter().position(|tab| tab.id == id) else {
             return;
         };
@@ -202,7 +256,19 @@ impl Workspace {
         if self.active == Some(id) {
             let neighbour = index.min(self.tabs.len().saturating_sub(1));
             self.active = self.tabs.get(neighbour).map(|tab| tab.id);
+            // The closed tab held the focus.
+            self.focus.focus(window, cx);
         }
+        cx.notify();
+    }
+
+    /// Shows the tab `step` places after the one shown, wrapping around.
+    fn cycle(&mut self, step: isize, cx: &mut Context<Self>) {
+        let Some(index) = self.tabs.iter().position(|tab| Some(tab.id) == self.active) else {
+            return;
+        };
+        let next = (index as isize + step).rem_euclid(self.tabs.len() as isize) as usize;
+        self.active = Some(self.tabs[next].id);
         cx.notify();
     }
 
@@ -325,7 +391,9 @@ impl Workspace {
                     .xsmall()
                     .icon(lucide("x"))
                     .tooltip(t("Close tab"))
-                    .on_click(cx.listener(move |this, _, _, cx| this.close(id, cx))),
+                    .on_click(
+                        cx.listener(move |this, _, window, cx| this.request_close(id, window, cx)),
+                    ),
             )
     }
 
@@ -475,6 +543,24 @@ impl Render for Workspace {
         };
         v_flex()
             .size_full()
+            .key_context(CONTEXT)
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &NewEditor, window, cx| {
+                if let Some(connection) = this.editor_target(cx) {
+                    this.open_editor(connection, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
+                if let Some(id) = this.active {
+                    this.request_close(id, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &NextTab, _, cx| this.cycle(1, cx)))
+            .on_action(cx.listener(|this, _: &PreviousTab, _, cx| this.cycle(-1, cx)))
+            .on_action(cx.listener(|this, _: &FilterTables, window, cx| {
+                this.navigator
+                    .update(cx, |navigator, cx| navigator.focus_filter(window, cx));
+            }))
             .child(self.render_strip(cx))
             .child(
                 div().flex_1().min_h_0().child(
