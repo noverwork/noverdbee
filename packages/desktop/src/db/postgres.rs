@@ -9,6 +9,7 @@ use tokio_postgres::error::ErrorPosition;
 use tokio_postgres::{CancelToken, Client, SimpleQueryMessage};
 
 use super::sql::{quote_literal, split_statements};
+use super::tunnel::{self, Tunnel};
 use super::{
     Column, ColumnInfo, ObjectKind, Outcome, ResultSet, StatementResult, TableInfo, TableRef,
     ROW_LIMIT,
@@ -22,6 +23,8 @@ pub struct PostgresSession {
     config: tokio_postgres::Config,
     /// A second connection that only parses, for [`PostgresSession::check`].
     checker: Arc<tokio::sync::Mutex<Option<Client>>>,
+    /// The forward every connection goes through; closes with the last clone.
+    _tunnel: Option<Arc<Tunnel>>,
 }
 
 impl fmt::Debug for PostgresSession {
@@ -39,10 +42,17 @@ impl PostgresSession {
         let connector = native_tls::TlsConnector::new()
             .map_err(|error| format!("cannot set up TLS: {error}"))?;
         let tls = MakeTlsConnector::new(connector);
+        let tunnel = tunnel::open(record).await?;
+        let port = match &tunnel {
+            Some(tunnel) => tunnel.port,
+            None => {
+                u16::try_from(record.port).map_err(|_| "the port is out of range".to_string())?
+            }
+        };
         let mut config = tokio_postgres::Config::new();
         config
             .host(&record.host)
-            .port(u16::try_from(record.port).map_err(|_| "the port is out of range".to_string())?)
+            .port(port)
             .user(&record.username)
             .password(&record.password)
             .application_name("noverdbee")
@@ -53,6 +63,10 @@ impl PostgresSession {
                 "require" => SslMode::Require,
                 _ => SslMode::Prefer,
             });
+        if tunnel.is_some() {
+            // Connect to the forward; TLS still checks the server's own name.
+            config.hostaddr(std::net::Ipv4Addr::LOCALHOST.into());
+        }
         if !record.database.is_empty() {
             config.dbname(&record.database);
         }
@@ -77,6 +91,7 @@ impl PostgresSession {
             tls,
             config,
             checker: Arc::default(),
+            _tunnel: tunnel.map(Arc::new),
         })
     }
 

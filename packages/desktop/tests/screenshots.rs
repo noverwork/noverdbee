@@ -129,6 +129,11 @@ mod shots {
                 username: "analyst".to_string(),
                 password: "secret".to_string(),
                 ssl_mode: "require".to_string(),
+                tunnel: desktop_lib::db::tunnel::TUNNEL_SSH.to_string(),
+                ssh_host: "bastion.internal".to_string(),
+                ssh_port: 22,
+                ssh_user: "ubuntu".to_string(),
+                ssh_key_path: "~/.ssh/id_ed25519".to_string(),
                 ..Default::default()
             };
             connection_save(warehouse, "Analytics".to_string(), app.state())

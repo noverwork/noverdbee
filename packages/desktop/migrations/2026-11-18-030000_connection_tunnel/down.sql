@@ -1,0 +1,9 @@
+ALTER TABLE db_connections DROP COLUMN kube_resource;
+ALTER TABLE db_connections DROP COLUMN kube_namespace;
+ALTER TABLE db_connections DROP COLUMN kube_context;
+ALTER TABLE db_connections DROP COLUMN ssh_key_path;
+ALTER TABLE db_connections DROP COLUMN ssh_password;
+ALTER TABLE db_connections DROP COLUMN ssh_user;
+ALTER TABLE db_connections DROP COLUMN ssh_port;
+ALTER TABLE db_connections DROP COLUMN ssh_host;
+ALTER TABLE db_connections DROP COLUMN tunnel;

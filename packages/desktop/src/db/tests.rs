@@ -611,3 +611,54 @@ async fn postgres_a_read_only_connection_refuses_writes() {
         .expect("reads still work");
     assert_eq!(rows.len(), 1);
 }
+
+/// Needs a server behind an SSH server: set `NOVERDBEE_TEST_PG_URL` to the
+/// database as the SSH server sees it, and `NOVERDBEE_TEST_SSH` to
+/// `user:password@host:port`. Skipped otherwise. Adds the SSH server to
+/// ~/.ssh/known_hosts.
+#[tokio::test]
+async fn postgres_connects_through_an_ssh_tunnel() {
+    let (Ok(url), Ok(ssh)) = (
+        std::env::var("NOVERDBEE_TEST_PG_URL"),
+        std::env::var("NOVERDBEE_TEST_SSH"),
+    ) else {
+        eprintln!("skipped: NOVERDBEE_TEST_PG_URL or NOVERDBEE_TEST_SSH is not set");
+        return;
+    };
+    let (login, address) = ssh.split_once('@').expect("user:password@host:port");
+    let (user, password) = login.split_once(':').expect("user:password");
+    let (host, port) = address.rsplit_once(':').expect("host:port");
+    let record = DbConnectionRecord {
+        tunnel: super::tunnel::TUNNEL_SSH.to_string(),
+        ssh_host: host.to_string(),
+        ssh_port: port.parse().expect("an SSH port"),
+        ssh_user: user.to_string(),
+        ssh_password: password.to_string(),
+        ..pg_record(&url)
+    };
+    let session = Session::open(&record).await.expect("connect through SSH");
+    let version = session.version().await.expect("version");
+    assert!(version.starts_with("PostgreSQL "), "{version}");
+    // The parse-only second connection goes through the tunnel too.
+    assert!(session.check("SELECT 1".to_string()).await.is_none());
+
+    // `NOVERDBEE_TEST_SSH_KEY`: a private key the SSH server accepts.
+    if let Ok(key) = std::env::var("NOVERDBEE_TEST_SSH_KEY") {
+        let with_key = DbConnectionRecord {
+            ssh_key_path: key,
+            ssh_password: String::new(),
+            ..record.clone()
+        };
+        let session = Session::open(&with_key)
+            .await
+            .expect("connect with the key");
+        session.version().await.expect("version");
+    }
+
+    let wrong = DbConnectionRecord {
+        ssh_password: "wrong".to_string(),
+        ..record
+    };
+    let refused = Session::open(&wrong).await.expect_err("a wrong password");
+    assert!(refused.contains("rejected"), "{refused}");
+}

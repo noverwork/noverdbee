@@ -67,6 +67,8 @@ minisign-verify = "0.2"
 # The MCP server for AI clients.
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "json"] }
 sqlformat = "0.5.0"
+# SSH tunnels to a database behind a bastion.
+russh = "0.59"
 
 [dev-dependencies]
 # Offscreen rendering for the screenshot test. Enabled on the GPUI crates

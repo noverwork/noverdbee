@@ -4,6 +4,7 @@
 mod postgres;
 pub mod sql;
 mod sqlite;
+pub mod tunnel;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

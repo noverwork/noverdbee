@@ -68,6 +68,20 @@ pub struct DbConnectionRecord {
     pub read_only: bool,
     pub environment: Environment,
     pub mcp: McpAccess,
+    /// Empty connects directly, `ssh` goes through an SSH server, `kubectl` through
+    /// `kubectl port-forward`. `host` and `port` are the target either way;
+    /// kubectl ignores `host`.
+    pub tunnel: String,
+    pub ssh_host: String,
+    pub ssh_port: i32,
+    pub ssh_user: String,
+    /// The SSH password, or the key's passphrase when a key is set.
+    pub ssh_password: String,
+    pub ssh_key_path: String,
+    pub kube_context: String,
+    pub kube_namespace: String,
+    /// What to forward to, such as `svc/postgres` or `pod/db-0`.
+    pub kube_resource: String,
 }
 
 /// The MCP tools AI clients may use on a connection. All off keeps the
