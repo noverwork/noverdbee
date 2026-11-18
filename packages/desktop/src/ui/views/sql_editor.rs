@@ -6,12 +6,14 @@ use std::time::Duration;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::highlighter::Diagnostic;
 use gpui_kit::component::input::{Editor, EditorState, InputEvent, RopeExt as _};
+use gpui_kit::component::list::ListItem;
 use gpui_kit::component::resizable::{resizable_panel, v_resizable};
-use gpui_kit::component::{h_flex, v_flex, Sizable as _};
+use gpui_kit::component::{h_flex, v_flex, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::db::{Outcome, SessionManager, StatementResult};
+use crate::store::history::HistoryEntry;
 use crate::ui::bridge::backend;
 use crate::ui::i18n::{t, tf};
 use crate::ui::icons::lucide;
@@ -167,6 +169,11 @@ impl SqlEditor {
         cx.spawn_in(window, async move |this, cx| {
             let ran = backend(async move {
                 let session = app.state::<SessionManager>().connect(&record).await?;
+                let saved =
+                    crate::store::history::history_add(record.id, sql.clone(), app.state()).await;
+                if let Err(error) = saved {
+                    tracing::warn!(error, "Failed to save query history");
+                }
                 Ok::<_, String>(session.run(sql).await)
             })
             .await;
@@ -185,6 +192,26 @@ impl SqlEditor {
                     }
                 }
                 cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Lists the SQL run on this connection; picking one puts it in the editor.
+    fn open_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let app = self.store.read(cx).app();
+        let connection = self.connection.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let loaded = backend(async move {
+                crate::store::history::history_list(connection, app.state()).await
+            })
+            .await;
+            let _ = this.update_in(cx, |_, window, cx| match loaded {
+                Ok(entries) => show_history(entries, cx.weak_entity(), window, cx),
+                Err(error) => window.push_notification(
+                    gpui_kit::component::notification::Notification::error(error),
+                    cx,
+                ),
             });
         })
         .detach();
@@ -325,6 +352,15 @@ impl SqlEditor {
             .border_color(theme::RIB)
             .bg(theme::RAIL)
             .child(action)
+            .child(div().flex_1())
+            .child(
+                Button::new("history")
+                    .ghost()
+                    .small()
+                    .icon(lucide("rotate-ccw-clock"))
+                    .label(t("History"))
+                    .on_click(cx.listener(|this, _, window, cx| this.open_history(window, cx))),
+            )
     }
 
     fn render_result_tabs(&self, cx: &Context<Self>) -> impl IntoElement {
@@ -436,6 +472,76 @@ impl SqlEditor {
             .when(!idle, |pane| pane.child(self.render_result_tabs(cx)))
             .child(div().flex_1().min_h_0().child(body))
     }
+}
+
+/// `11-18 14:02`, in local time.
+fn ran_at(entry: &HistoryEntry) -> SharedString {
+    chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(entry.ran_at, chrono::Utc)
+        .with_timezone(&chrono::Local)
+        .format("%m-%d %H:%M")
+        .to_string()
+        .into()
+}
+
+fn show_history(
+    entries: Vec<HistoryEntry>,
+    editor: WeakEntity<SqlEditor>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let entries: std::rc::Rc<[HistoryEntry]> = entries.into();
+    window.open_dialog(cx, move |dialog, _, _| {
+        let body = if entries.is_empty() {
+            div()
+                .py_6()
+                .text_sm()
+                .text_color(theme::STENCIL_FAINT)
+                .child(t("Nothing has run on this connection yet."))
+                .into_any_element()
+        } else {
+            v_flex()
+                .id("history")
+                .max_h(px(480.))
+                .overflow_y_scroll()
+                .gap_1()
+                .children(entries.iter().enumerate().map(|(index, entry)| {
+                    let sql = entry.sql.clone();
+                    let editor = editor.clone();
+                    ListItem::new(("history-entry", index))
+                        .py_2()
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .items_start()
+                                .gap_3()
+                                .child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .text_size(px(11.))
+                                        .text_color(theme::STENCIL_MUTE)
+                                        .child(ran_at(entry)),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .line_clamp(3)
+                                        .text_sm()
+                                        .text_color(theme::STENCIL_DIM)
+                                        .child(entry.sql.clone()),
+                                ),
+                        )
+                        .on_click(move |_, window, cx| {
+                            let _ =
+                                editor.update(cx, |editor, cx| editor.set_text(&sql, window, cx));
+                            window.close_dialog(cx);
+                        })
+                }))
+                .into_any_element()
+        };
+        dialog.title(t("History")).w(px(720.)).child(body)
+    })
 }
 
 impl Render for SqlEditor {

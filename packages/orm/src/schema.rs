@@ -34,6 +34,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    query_history (id) {
+        id -> Text,
+        connection_id -> Text,
+        sql -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     settings (key) {
         key -> Text,
         value -> Text,
@@ -43,5 +53,11 @@ diesel::table! {
 }
 
 diesel::joinable!(db_connections -> connection_groups (group_id));
+diesel::joinable!(query_history -> db_connections (connection_id));
 
-diesel::allow_tables_to_appear_in_same_query!(connection_groups, db_connections, settings,);
+diesel::allow_tables_to_appear_in_same_query!(
+    connection_groups,
+    db_connections,
+    query_history,
+    settings,
+);
