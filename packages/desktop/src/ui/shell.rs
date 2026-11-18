@@ -116,6 +116,9 @@ impl Shell {
         let store_handle = self.store.clone();
         let active = match route {
             Route::Databases | Route::ConnectionForm(_) | Route::NewConnectionIn(_) => "databases",
+            Route::SshHosts | Route::SshHostForm(_) => "ssh-hosts",
+            Route::SshKeys | Route::SshKeyForm(_) => "ssh-keys",
+            Route::Kubeconfigs | Route::KubeconfigForm(_) => "kubeconfigs",
             Route::Mcp => "mcp",
             Route::Settings => "settings",
         };
@@ -163,6 +166,30 @@ impl Shell {
                         cx,
                     ))
                     .child(self.nav_item(
+                        "nav-ssh-hosts",
+                        t("SSH Hosts"),
+                        "server",
+                        Route::SshHosts,
+                        active == "ssh-hosts",
+                        cx,
+                    ))
+                    .child(self.nav_item(
+                        "nav-ssh-keys",
+                        t("Keys"),
+                        "key-round",
+                        Route::SshKeys,
+                        active == "ssh-keys",
+                        cx,
+                    ))
+                    .child(self.nav_item(
+                        "nav-kubeconfigs",
+                        t("Kubeconfigs"),
+                        "ship-wheel",
+                        Route::Kubeconfigs,
+                        active == "kubeconfigs",
+                        cx,
+                    ))
+                    .child(self.nav_item(
                         "nav-mcp",
                         t("MCP"),
                         "plug",
@@ -195,32 +222,44 @@ impl Shell {
             Route::Databases | Route::ConnectionForm(_) | Route::NewConnectionIn(_) => {
                 (t("Databases"), "database")
             }
+            Route::SshHosts | Route::SshHostForm(_) => (t("SSH Hosts"), "server"),
+            Route::SshKeys | Route::SshKeyForm(_) => (t("Keys"), "key-round"),
+            Route::Kubeconfigs | Route::KubeconfigForm(_) => (t("Kubeconfigs"), "ship-wheel"),
             Route::Mcp => (t("MCP"), "plug"),
             Route::Settings => (t("Settings"), "settings"),
         };
         h_flex()
             .h_9()
             .flex_shrink_0()
-            .px_2()
             .bg(theme::RIB)
+            .border_b_1()
+            .border_color(theme::RIB)
             .child(page_label(label, icon))
     }
 }
 
-/// The outlined cell at the left of the top bar that names the page.
+/// The cell at the left of the top bar that names the page, as in noverterm.
 pub fn page_label(label: SharedString, icon: &'static str) -> Div {
     h_flex()
-        .h_7()
+        .h_full()
         .flex_shrink_0()
-        .gap_2()
-        .px_2p5()
-        .rounded(theme::RADIUS)
-        .border_1()
-        .border_color(theme::STENCIL)
-        .text_size(px(11.))
-        .text_color(theme::STENCIL)
-        .child(lucide(icon).size_3p5().text_color(theme::STENCIL_DIM))
-        .child(SharedString::from(label.to_uppercase()))
+        .px_2()
+        .bg(theme::RAIL)
+        .border_r_1()
+        .border_color(theme::RIB)
+        .child(
+            h_flex()
+                .h_7()
+                .gap_2()
+                .px_2p5()
+                .rounded(theme::RADIUS)
+                .border_1()
+                .border_color(theme::STENCIL)
+                .text_size(px(11.))
+                .text_color(theme::STENCIL)
+                .child(lucide(icon).size_3p5().text_color(theme::STENCIL_DIM))
+                .child(SharedString::from(label.to_uppercase())),
+        )
 }
 
 /// A 40x28 icon button in the sidebar rail.

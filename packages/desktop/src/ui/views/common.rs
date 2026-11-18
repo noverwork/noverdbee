@@ -2,12 +2,16 @@
 //! banners, and the delete confirmation.
 
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
+use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::menu::{ContextMenu, ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::select::{SelectItem, SelectState};
-use gpui_kit::component::{h_flex, v_flex, Disableable as _, IndexPath, WindowExt as _};
+use gpui_kit::component::{
+    h_flex, v_flex, Disableable as _, IndexPath, Sizable as _, WindowExt as _,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::ui::i18n::t;
+use crate::ui::i18n::{t, tf};
 use crate::ui::icons::lucide;
 use crate::ui::theme;
 
@@ -233,6 +237,181 @@ pub fn card(id: impl Into<ElementId>) -> Stateful<Div> {
             style
                 .border_color(theme::STENCIL.opacity(0.2))
                 .bg(theme::RIB_HOVER)
+        })
+}
+
+/// A page listing saved items as cards, with a search box and a button to
+/// add one. `cards` are the items matching the search; `empty` says why
+/// there are none.
+pub fn list_page(
+    title: SharedString,
+    search: &Entity<InputState>,
+    add_label: SharedString,
+    on_add: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    error: Option<SharedString>,
+    empty: SharedString,
+    cards: Vec<AnyElement>,
+) -> Div {
+    let body = if cards.is_empty() {
+        empty_state(empty).into_any_element()
+    } else {
+        div()
+            .grid()
+            .grid_cols(3)
+            .gap_3()
+            .children(cards)
+            .into_any_element()
+    };
+    page(
+        title,
+        h_flex()
+            .gap_2()
+            .child(
+                div().w(px(192.)).child(
+                    Input::new(search)
+                        .small()
+                        .prefix(lucide("search").xsmall().text_color(theme::STENCIL_FAINT)),
+                ),
+            )
+            .child(
+                Button::new("add-item")
+                    .primary()
+                    .small()
+                    .icon(lucide("plus"))
+                    .label(add_label)
+                    .on_click(on_add),
+            ),
+        page_body("items")
+            .children(error.map(|error| error_banner(error).mb_4()))
+            .child(body),
+    )
+}
+
+/// The search box of a [`list_page`]; the page redraws as the text changes.
+pub fn new_search<V: 'static>(
+    placeholder: SharedString,
+    window: &mut Window,
+    cx: &mut Context<V>,
+) -> (Entity<InputState>, Subscription) {
+    let search = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+    let changed = cx.observe(&search, |_, _, cx| cx.notify());
+    (search, changed)
+}
+
+/// Whether `query`, as typed into a search box, is in any of `texts`.
+pub fn matches(query: &str, texts: &[&str]) -> bool {
+    let query = query.trim().to_lowercase();
+    query.is_empty()
+        || texts
+            .iter()
+            .any(|text| text.to_lowercase().contains(&query))
+}
+
+/// Shown instead of a form whose item no longer exists.
+pub fn not_found(
+    title: SharedString,
+    back_label: SharedString,
+    on_back: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Div {
+    v_flex()
+        .size_full()
+        .items_center()
+        .justify_center()
+        .gap_5()
+        .child(lucide("circle-alert").size_7().text_color(theme::RED_TEXT))
+        .child(
+            div()
+                .text_xl()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(title),
+        )
+        .child(
+            Button::new("back")
+                .primary()
+                .label(back_label)
+                .on_click(on_back),
+        )
+}
+
+/// A card for one saved item: its icon, name and detail lines. Clicking it
+/// opens the item; the delete button shows under the pointer, and a right
+/// click offers both.
+pub fn item_card(
+    id: &str,
+    icon: &'static str,
+    name: &str,
+    details: Vec<SharedString>,
+    on_open: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_delete: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> ContextMenu<Stateful<Div>> {
+    type Handler = std::rc::Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+    let (on_open, on_delete): (Handler, Handler) =
+        (std::rc::Rc::new(on_open), std::rc::Rc::new(on_delete));
+    let (click_open, click_delete) = (on_open.clone(), on_delete.clone());
+    let menu_label = SharedString::from(name.to_string());
+    let group: SharedString = format!("item-{id}").into();
+    card(group.clone())
+        .group(group.clone())
+        .cursor_pointer()
+        .on_click(move |event, window, cx| click_open(event, window, cx))
+        .child(
+            h_flex()
+                .items_start()
+                .gap_3()
+                .child(icon_box(icon))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_1()
+                        .child(
+                            div()
+                                .truncate()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(name.to_string()),
+                        )
+                        .children(details.into_iter().map(|detail| {
+                            div()
+                                .truncate()
+                                .text_xs()
+                                .text_color(theme::STENCIL_MUTE)
+                                .child(detail)
+                        })),
+                )
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .invisible()
+                        .group_hover(group, |style| style.visible())
+                        .child(
+                            Button::new(SharedString::from(format!("delete-{id}")))
+                                .ghost()
+                                .small()
+                                .icon(lucide("trash"))
+                                .tooltip(tf("Delete {name}", &[("name", name)]))
+                                .on_click(move |event, window, cx| {
+                                    cx.stop_propagation();
+                                    click_delete(event, window, cx);
+                                }),
+                        ),
+                ),
+        )
+        .context_menu(move |menu, _, _| {
+            let (on_open, on_delete) = (on_open.clone(), on_delete.clone());
+            menu.label(menu_label.clone())
+                .separator()
+                .item(
+                    PopupMenuItem::new(t("Edit"))
+                        .icon(lucide("pencil"))
+                        .on_click(move |event, window, cx| on_open(event, window, cx)),
+                )
+                .separator()
+                .item(
+                    PopupMenuItem::new(t("Delete"))
+                        .icon(lucide("trash"))
+                        .on_click(move |event, window, cx| on_delete(event, window, cx)),
+                )
         })
 }
 

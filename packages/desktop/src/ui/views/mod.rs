@@ -2,6 +2,7 @@
 
 pub mod common;
 pub mod db_connection_form;
+pub mod kubeconfigs;
 pub mod mcp;
 pub mod navigator;
 pub mod result_grid;
@@ -9,6 +10,8 @@ pub mod selection;
 pub mod settings;
 pub mod sql_completion;
 pub mod sql_editor;
+pub mod ssh_hosts;
+pub mod ssh_keys;
 pub mod table_view;
 pub mod updater;
 pub mod workspace;
@@ -30,6 +33,26 @@ pub fn build(route: &Route, window: &mut Window, cx: &mut App) -> AnyView {
         Route::NewConnectionIn(group) => {
             let group = Some(group.clone());
             cx.new(|cx| db_connection_form::DbConnectionForm::new(None, group, window, cx))
+                .into()
+        }
+        Route::SshHosts => cx.new(|cx| ssh_hosts::SshHostsView::new(window, cx)).into(),
+        Route::SshHostForm(id) => {
+            let id = id.clone();
+            cx.new(|cx| ssh_hosts::SshHostForm::new(id, window, cx))
+                .into()
+        }
+        Route::SshKeys => cx.new(|cx| ssh_keys::SshKeysView::new(window, cx)).into(),
+        Route::SshKeyForm(id) => {
+            let id = id.clone();
+            cx.new(|cx| ssh_keys::SshKeyForm::new(id, window, cx))
+                .into()
+        }
+        Route::Kubeconfigs => cx
+            .new(|cx| kubeconfigs::KubeconfigsView::new(window, cx))
+            .into(),
+        Route::KubeconfigForm(id) => {
+            let id = id.clone();
+            cx.new(|cx| kubeconfigs::KubeconfigForm::new(id, window, cx))
                 .into()
         }
         Route::Mcp => cx.new(|cx| mcp::McpView::new(window, cx)).into(),

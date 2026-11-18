@@ -2,6 +2,7 @@ pub mod connections;
 pub mod groups;
 pub mod history;
 pub mod settings;
+pub mod tunnels;
 
 use std::path::{Path, PathBuf};
 

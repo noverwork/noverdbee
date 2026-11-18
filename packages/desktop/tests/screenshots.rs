@@ -120,6 +120,30 @@ mod shots {
                     shop = saved.id;
                 }
             }
+            use desktop_lib::store::tunnels;
+            let bastion = tunnels::ssh_host_save(
+                shared::SshHostRecord {
+                    name: "bastion".to_string(),
+                    host: "bastion.internal".to_string(),
+                    port: 22,
+                    username: "ubuntu".to_string(),
+                    password: "secret".to_string(),
+                    ..Default::default()
+                },
+                app.state(),
+            )
+            .await
+            .expect("save SSH host");
+            tunnels::kubeconfig_save(
+                shared::KubeconfigRecord {
+                    name: "staging".to_string(),
+                    config: "apiVersion: v1\nkind: Config\ncurrent-context: staging\n".to_string(),
+                    ..Default::default()
+                },
+                app.state(),
+            )
+            .await
+            .expect("save kubeconfig");
             let warehouse = DbConnectionRecord {
                 name: "warehouse".to_string(),
                 driver: desktop_lib::db::DRIVER_POSTGRES.to_string(),
@@ -130,10 +154,7 @@ mod shots {
                 password: "secret".to_string(),
                 ssl_mode: "require".to_string(),
                 tunnel: desktop_lib::db::tunnel::TUNNEL_SSH.to_string(),
-                ssh_host: "bastion.internal".to_string(),
-                ssh_port: 22,
-                ssh_user: "ubuntu".to_string(),
-                ssh_key_path: "~/.ssh/id_ed25519".to_string(),
+                ssh_host_id: Some(bastion.id),
                 ..Default::default()
             };
             connection_save(warehouse, "Analytics".to_string(), app.state())
@@ -381,6 +402,16 @@ mod shots {
             ("connection-new", Route::ConnectionForm(None)),
             ("connection-postgres", Route::ConnectionForm(warehouse)),
             ("connection-edit", Route::ConnectionForm(Some(shop))),
+            ("ssh-hosts", Route::SshHosts),
+            ("ssh-host-new", Route::SshHostForm(None)),
+            ("ssh-keys", Route::SshKeys),
+            ("ssh-key-new", Route::SshKeyForm(None)),
+            ("kubeconfigs", Route::Kubeconfigs),
+            ("kubeconfig-new", Route::KubeconfigForm(None)),
+            (
+                "ssh-key-missing",
+                Route::SshKeyForm(Some("gone".to_string())),
+            ),
         ] {
             stage.store(|store, cx| store.navigate(route, cx));
             stage.settle(Duration::from_millis(300));

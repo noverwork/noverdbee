@@ -628,14 +628,19 @@ async fn postgres_connects_through_an_ssh_tunnel() {
     let (login, address) = ssh.split_once('@').expect("user:password@host:port");
     let (user, password) = login.split_once(':').expect("user:password");
     let (host, port) = address.rsplit_once(':').expect("host:port");
-    let record = DbConnectionRecord {
+    let login = shared::SshLogin {
+        host: host.to_string(),
+        port: port.parse().expect("an SSH port"),
+        username: user.to_string(),
+        password: password.to_string(),
+        ..Default::default()
+    };
+    let through = |login: shared::SshLogin| DbConnectionRecord {
         tunnel: super::tunnel::TUNNEL_SSH.to_string(),
-        ssh_host: host.to_string(),
-        ssh_port: port.parse().expect("an SSH port"),
-        ssh_user: user.to_string(),
-        ssh_password: password.to_string(),
+        ssh: Some(login),
         ..pg_record(&url)
     };
+    let record = through(login.clone());
     let session = Session::open(&record).await.expect("connect through SSH");
     let version = session.version().await.expect("version");
     assert!(version.starts_with("PostgreSQL "), "{version}");
@@ -644,21 +649,21 @@ async fn postgres_connects_through_an_ssh_tunnel() {
 
     // `NOVERDBEE_TEST_SSH_KEY`: a private key the SSH server accepts.
     if let Ok(key) = std::env::var("NOVERDBEE_TEST_SSH_KEY") {
-        let with_key = DbConnectionRecord {
-            ssh_key_path: key,
-            ssh_password: String::new(),
-            ..record.clone()
-        };
+        let with_key = through(shared::SshLogin {
+            private_key: std::fs::read_to_string(key).expect("the key file"),
+            password: String::new(),
+            ..login.clone()
+        });
         let session = Session::open(&with_key)
             .await
             .expect("connect with the key");
         session.version().await.expect("version");
     }
 
-    let wrong = DbConnectionRecord {
-        ssh_password: "wrong".to_string(),
-        ..record
-    };
+    let wrong = through(shared::SshLogin {
+        password: "wrong".to_string(),
+        ..login
+    });
     let refused = Session::open(&wrong).await.expect_err("a wrong password");
     assert!(refused.contains("rejected"), "{refused}");
 }
