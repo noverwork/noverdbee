@@ -82,7 +82,7 @@ Where the first version differs from the text above:
 - SSL modes are `disable`, `prefer` and `require`; certificates are checked against the system roots only.
 - The password is saved in plain text in the app's SQLite store and is shown again when editing.
 - The form opens in a 640px drawer on the right over the Databases page, not as a full-page route; the navigator and tabs stay visible. Saving or cancelling closes the drawer.
-- Sections are a title over their fields with a hairline between them. The first group (type, environment, name, group, read-only, and the SQLite path) has no title.
+- Sections are rib cards on the rail drawer, as DESIGN.md's Form Drawer describes. The first card (type, environment, name, group, read-only, and the SQLite path) has no title.
 - Read-only applies to both drivers. A Tunnel section (none, SSH, Kubernetes) sits above Server because it decides which address fields Server asks for. An AI access (MCP) section follows.
 
 ## Open decisions

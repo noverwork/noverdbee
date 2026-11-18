@@ -220,8 +220,6 @@ Workspace tabs are 28px tall, flex between 176px and 240px, and sit 4px apart wi
 
 An editor tab splits vertically: a 32px toolbar, the editor on ink with 14px padding, a draggable 1px splitter, then the result pane with its own 24px footer. Tree rows and grid rows are 24px tall. Full-page views are padded 20px (32px from the lg breakpoint) and separate their header from content with a 1px hairline rule and 20px of space. Fields are 44px tall. Density is high; spacing follows a 4px step.
 
-Add and edit forms open in a drawer on the right, over the page they were opened from: 560px wide, 640px for the connection form. The drawer sits on port with a hairline left edge and no shadow; its title and close control are at the top, the fields scroll, and Cancel and Save stay at the foot above a hairline. Esc, Cancel, Save, and the close control shut it; a click outside does not. Fields and buttons are inset 16px, level with the title.
-
 ## Elevation & Depth
 
 The system is flat. Depth is tonal: rail sits darker than port, rib sits lighter, and every boundary is a 1px hairline or a rib-coloured rule. There are no drop shadows and no blur. The only box-shadow is a 1px inset top hairline (white at 6%) on the editor frame, which is an edge, not elevation. Dialogs and popovers separate from the page by sitting on rail with a hairline border.
@@ -256,8 +254,14 @@ Solid, square, and blunt.
 - **Border:** 1px hairline; seal at 60% for disconnected and error panels, ochre at 60% for warning and pending-change panels.
 - **Internal Padding:** 24-32px for dialogs and overlays, with a footer band on port separated by a hairline.
 
-### Form Sections
-A form is one column of fields. Related short fields share a row (host and port, user and password). A group that needs a name has its title in body above its fields and a hairline over it; the first group has no title, because the drawer title already names it. No cards, no icons. A hint appears under a section title only when it changes a decision.
+### Form Drawer
+Every add and edit form (connection, SSH host, SSH key, kubeconfig) opens in a drawer that slides in from the right over the current page; the page behind stays as it was.
+- **Size:** 560px wide; 640px for the connection form, whose paired fields need the room. It runs from under the top bar to the window's foot.
+- **Surface:** rail, with a 1px hairline on its left edge and no shadow. Form sections inside it are rib cards.
+- **Sections:** a card has a title only when the group needs a name; the first card has none, because the drawer title already names it. Cards carry no icon. Related short fields share a row (host and port, user and password). A hint under a title appears only when it changes a decision.
+- **Header:** the form title in the Title style (20px), aligned with the 24px inset of the fields, and a close button on the right.
+- **Footer:** a band on port above a hairline, with Cancel and the submit action on the right. It stays pinned while the fields scroll.
+- **Closing:** Cancel, a successful save, Esc, or the close button. Clicking outside the drawer does not close it, so a half-filled form is not lost.
 
 ### Inputs / Fields
 - **Style:** 44px tall, rail fill, hairline edge, 2px corner, stencil text, stencil-faint placeholder. Inline fields in toolbars and the navigator filter are 24px tall with the same treatment.

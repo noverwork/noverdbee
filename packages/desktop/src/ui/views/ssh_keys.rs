@@ -324,8 +324,7 @@ impl Render for SshKeyForm {
         });
         common::form_page(
             self.error.clone(),
-            v_flex()
-                .gap_4()
+            common::form_section(None, None)
                 .children(fingerprint)
                 .child(common::field(
                     t("Name"),

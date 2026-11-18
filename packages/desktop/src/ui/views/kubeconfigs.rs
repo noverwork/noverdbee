@@ -2,7 +2,6 @@
 //! noverterm's Keys page.
 
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
-use gpui_kit::component::v_flex;
 use gpui_kit::*;
 use shared::KubeconfigRecord;
 
@@ -258,8 +257,7 @@ impl Render for KubeconfigForm {
 
         common::form_page(
             self.error.clone(),
-            v_flex()
-                .gap_4()
+            common::form_section(None, None)
                 .child(common::field(
                     t("Name"),
                     Input::new(&self.name).disabled(saving),
