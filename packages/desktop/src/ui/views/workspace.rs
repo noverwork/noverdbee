@@ -6,6 +6,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::resizable::{h_resizable, resizable_panel};
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{h_flex, v_flex, Disableable as _, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -645,7 +646,39 @@ impl Workspace {
             .child(div().flex_shrink_0().child(counts))
     }
 
-    fn render_empty(&self, cx: &Context<Self>) -> impl IntoElement {
+    /// Shown in front of any open tab while a connection opens: opening can
+    /// take seconds, and the user asked for this connection, not that tab.
+    fn render_connecting(&self, id: &str, cx: &Context<Self>) -> AnyElement {
+        let name = self
+            .store
+            .read(cx)
+            .connection(id)
+            .map(|record| SharedString::from(record.name.clone()))
+            .unwrap_or_default();
+        let (navigator, id) = (self.navigator.clone(), id.to_string());
+        v_flex()
+            .size_full()
+            .items_center()
+            .justify_center()
+            .gap_4()
+            .bg(theme::PORT)
+            .text_sm()
+            .text_color(theme::STENCIL_MUTE)
+            .child(Spinner::new().large().color(theme::STENCIL.into()))
+            .child(t("Connecting"))
+            .child(name)
+            .child(
+                Button::new("cancel-connect")
+                    .ghost()
+                    .label(t("Cancel"))
+                    .on_click(move |_, _, cx| {
+                        navigator.update(cx, |navigator, cx| navigator.disconnect(&id, cx));
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn render_empty(&self, cx: &Context<Self>) -> AnyElement {
         let has_connections = !self.store.read(cx).connections.is_empty();
         let store = self.store.clone();
         v_flex()
@@ -671,15 +704,20 @@ impl Workspace {
                         });
                     })
             }))
+            .into_any_element()
     }
 }
 
 impl Render for Workspace {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let connecting = self.navigator.read(cx).connecting().map(str::to_string);
         let content = match self.active_tab().map(|tab| &tab.view) {
+            _ if connecting.is_some() => {
+                self.render_connecting(connecting.as_deref().unwrap_or_default(), cx)
+            }
             Some(TabView::Editor(editor)) => editor.clone().into_any_element(),
             Some(TabView::Table(view)) => view.clone().into_any_element(),
-            None => self.render_empty(cx).into_any_element(),
+            None => self.render_empty(cx),
         };
         v_flex()
             .size_full()

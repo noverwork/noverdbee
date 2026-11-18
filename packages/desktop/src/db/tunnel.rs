@@ -3,7 +3,7 @@
 //! to the forward's port on 127.0.0.1.
 
 use std::net::Ipv4Addr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use k8s_openapi::api::apps::v1::{Deployment, StatefulSet};
@@ -29,7 +29,19 @@ const START_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct Tunnel {
     /// The local port that reaches the database.
     pub port: u16,
+    failure: Failure,
     task: JoinHandle<()>,
+}
+
+/// Why the far end refused the last forward, if it did.
+type Failure = Arc<Mutex<Option<String>>>;
+
+impl Tunnel {
+    /// Why the far end refused the last forward. The database client only
+    /// sees its connection close, so this is the error worth showing.
+    pub fn failure(&self) -> Option<String> {
+        self.failure.lock().unwrap().clone()
+    }
 }
 
 impl Drop for Tunnel {
@@ -111,16 +123,19 @@ async fn ssh(record: &DbConnectionRecord, target_port: u16) -> Result<Tunnel, St
         .port();
     let handle = Arc::new(handle);
     let target_host = record.host.clone();
+    let failure = Failure::default();
+    let failed = failure.clone();
     let task = tokio::spawn(async move {
         // ponytail: the forward tasks outlive the listener until their own
         // streams end; track them in a JoinSet if that ever matters.
         while let Ok((mut local, peer)) = listener.accept().await {
             let handle = handle.clone();
             let target_host = target_host.clone();
+            let failed = failed.clone();
             tokio::spawn(async move {
                 let channel = match handle
                     .channel_open_direct_tcpip(
-                        target_host,
+                        target_host.clone(),
                         target_port.into(),
                         peer.ip().to_string(),
                         peer.port().into(),
@@ -130,6 +145,9 @@ async fn ssh(record: &DbConnectionRecord, target_port: u16) -> Result<Tunnel, St
                     Ok(channel) => channel,
                     Err(error) => {
                         tracing::warn!(error = %error, "SSH server refused the forward");
+                        *failed.lock().unwrap() = Some(format!(
+                            "the SSH server cannot reach {target_host}:{target_port}: {error}"
+                        ));
                         return;
                     }
                 };
@@ -138,7 +156,11 @@ async fn ssh(record: &DbConnectionRecord, target_port: u16) -> Result<Tunnel, St
             });
         }
     });
-    Ok(Tunnel { port, task })
+    Ok(Tunnel {
+        port,
+        failure,
+        task,
+    })
 }
 
 /// Signs in with the host's key when it has one, falling back to its
@@ -242,25 +264,42 @@ async fn kube(record: &DbConnectionRecord, target_port: u16) -> Result<Tunnel, S
         .map_err(|error| format!("cannot open a local port: {error}"))?
         .port();
     let pods: Api<Pod> = Api::namespaced(client, &namespace);
+    let failure = Failure::default();
+    let failed = failure.clone();
     let task = tokio::spawn(async move {
         while let Ok((mut local, _)) = listener.accept().await {
-            let (pods, pod) = (pods.clone(), pod.clone());
+            let (pods, pod, failed) = (pods.clone(), pod.clone(), failed.clone());
             tokio::spawn(async move {
+                let refused = |error: String| {
+                    tracing::warn!(error, pod, "Kubernetes refused the forward");
+                    *failed.lock().unwrap() = Some(format!(
+                        "cannot forward to port {pod_port} of pod {pod}: {error}"
+                    ));
+                };
                 let mut forwarder = match pods.portforward(&pod, &[pod_port]).await {
                     Ok(forwarder) => forwarder,
-                    Err(error) => {
-                        tracing::warn!(error = %error, pod, "Kubernetes refused the forward");
-                        return;
-                    }
+                    Err(error) => return refused(error.to_string()),
                 };
-                let Some(mut remote) = forwarder.take_stream(pod_port) else {
+                let (Some(mut remote), Some(error)) = (
+                    forwarder.take_stream(pod_port),
+                    forwarder.take_error(pod_port),
+                ) else {
                     return;
                 };
-                let _ = tokio::io::copy_bidirectional(&mut local, &mut remote).await;
+                // The pod reports a port nothing listens on here, and leaves
+                // the stream open: without this the client would wait forever.
+                tokio::select! {
+                    _ = tokio::io::copy_bidirectional(&mut local, &mut remote) => {}
+                    Some(error) = error => refused(error),
+                }
             });
         }
     });
-    Ok(Tunnel { port, task })
+    Ok(Tunnel {
+        port,
+        failure,
+        task,
+    })
 }
 
 /// The pod behind `resource` and the port on it that `port` means. `resource`

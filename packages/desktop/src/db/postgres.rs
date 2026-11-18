@@ -15,6 +15,9 @@ use super::{
     ROW_LIMIT,
 };
 
+/// How long the server may take to answer a new connection.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 #[derive(Clone)]
 pub struct PostgresSession {
     client: Arc<Client>,
@@ -80,10 +83,14 @@ impl PostgresSession {
             // It guards against mistakes: `SET` can still turn it off.
             config.options("-c default_transaction_read_only=on");
         }
-        let (client, connection) = config
-            .connect(tls.clone())
-            .await
-            .map_err(|error| describe(&error))?;
+        // A forward that leads nowhere accepts the connection and never answers.
+        let (client, connection) =
+            tokio::time::timeout(CONNECT_TIMEOUT, config.connect(tls.clone()))
+                .await
+                .map_err(|_| "the database did not answer within 15 seconds".to_string())
+                .and_then(|connected| connected.map_err(|error| describe(&error)))
+                // The tunnel knows why; the client only saw the connection close.
+                .map_err(|error| tunnel.as_ref().and_then(Tunnel::failure).unwrap_or(error))?;
         // The connection does the I/O; it ends when the client is dropped.
         tokio::spawn(async move {
             if let Err(error) = connection.await {
