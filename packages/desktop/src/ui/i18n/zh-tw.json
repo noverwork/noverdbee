@@ -169,5 +169,6 @@
  "Close Tabs to the Right": "關閉右側分頁",
  "Close All Tabs": "關閉所有分頁",
  "Run on production?": "在 Production 上執行？",
- "This SQL can change data or schema on a production database.": "這段 SQL 可能會修改 Production 資料庫的資料或結構。"
+ "This SQL can change data or schema on a production database.": "這段 SQL 可能會修改 Production 資料庫的資料或結構。",
+ "Format SQL (Alt+Shift+F)": "整理 SQL 格式 (Alt+Shift+F)"
 }
