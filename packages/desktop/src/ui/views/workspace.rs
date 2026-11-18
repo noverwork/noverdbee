@@ -3,6 +3,7 @@
 //! open survives a visit to another page.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::resizable::{h_resizable, resizable_panel};
 use gpui_kit::component::{h_flex, v_flex, Disableable as _, Sizable as _, WindowExt as _};
@@ -10,15 +11,65 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::db::TableRef;
+use crate::ui::bridge::backend;
 use crate::ui::i18n::{t, tf};
 use crate::ui::icons::lucide;
 use crate::ui::shell::page_label;
 use crate::ui::stencil;
 use crate::ui::store::{store, Route, Store};
 use crate::ui::theme;
+use crate::ui::views::common;
 use crate::ui::views::navigator::{state_shape, ConnectionState, Navigator, NavigatorEvent};
 use crate::ui::views::sql_editor::SqlEditor;
 use crate::ui::views::table_view::TableView;
+
+actions!(
+    noverdbee,
+    [
+        NewEditor,
+        OpenFile,
+        CloseTab,
+        NextTab,
+        PreviousTab,
+        FilterTables
+    ]
+);
+
+/// Shows the tab at this index.
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = noverdbee, no_json)]
+pub struct SelectTab(pub usize);
+
+pub fn bind_keys(cx: &mut App) {
+    // Cmd on macOS; Ctrl elsewhere.
+    let modifier = if cfg!(target_os = "macos") {
+        "cmd"
+    } else {
+        "ctrl"
+    };
+    let key = |keys: &str| -> &'static str { format!("{modifier}-{keys}").leak() };
+    let mut bindings = vec![
+        KeyBinding::new(key("t"), NewEditor, Some(CONTEXT)),
+        KeyBinding::new(key("o"), OpenFile, Some(CONTEXT)),
+        KeyBinding::new(key("w"), CloseTab, Some(CONTEXT)),
+        KeyBinding::new(key("shift-]"), NextTab, Some(CONTEXT)),
+        KeyBinding::new(key("shift-["), PreviousTab, Some(CONTEXT)),
+        KeyBinding::new("ctrl-tab", NextTab, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-tab", PreviousTab, Some(CONTEXT)),
+        KeyBinding::new(key("p"), FilterTables, Some(CONTEXT)),
+    ];
+    for index in 0..9 {
+        let digit = (index + 1).to_string();
+        bindings.push(KeyBinding::new(
+            key(&digit),
+            SelectTab(index),
+            Some(CONTEXT),
+        ));
+    }
+    cx.bind_keys(bindings);
+}
+
+const CONTEXT: &str = "Workspace";
 
 enum TabView {
     Editor(Entity<SqlEditor>),
@@ -62,6 +113,8 @@ pub struct Workspace {
     active: Option<usize>,
     next_tab: usize,
     queries: usize,
+    /// Keeps the shortcuts working when no tab holds the focus.
+    focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -86,7 +139,7 @@ impl Workspace {
                 window,
                 |this, _, event: &NavigatorEvent, window, cx| match event {
                     NavigatorEvent::NewEditor { connection } => {
-                        this.open_editor(connection.clone(), window, cx)
+                        this.open_editor(connection.clone(), window, cx);
                     }
                     // A connection that just opened gets an editor to start in.
                     NavigatorEvent::Connected { connection } => {
@@ -104,6 +157,8 @@ impl Workspace {
                 },
             ),
         ];
+        let focus = cx.focus_handle();
+        focus.focus(window, cx);
         Self {
             store,
             navigator,
@@ -111,6 +166,7 @@ impl Workspace {
             active: None,
             next_tab: 0,
             queries: 0,
+            focus,
             _subscriptions,
         }
     }
@@ -139,7 +195,12 @@ impl Workspace {
         })
     }
 
-    pub fn open_editor(&mut self, connection: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_editor(
+        &mut self,
+        connection: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<SqlEditor> {
         let editor = cx.new(|cx| SqlEditor::new(connection.clone(), window, cx));
         self.queries += 1;
         let id = self.next_tab;
@@ -149,10 +210,10 @@ impl Workspace {
             connection,
             title: tf("Query {number}", &[("number", &self.queries.to_string())]),
             _observer: cx.observe(&editor, |_, _, cx| cx.notify()),
-            view: TabView::Editor(editor),
+            view: TabView::Editor(editor.clone()),
         });
-        self.active = Some(id);
-        cx.notify();
+        self.show(id, window, cx);
+        editor
     }
 
     /// Shows the tab for `table`, opening one if there is none.
@@ -167,9 +228,8 @@ impl Workspace {
             TabView::Table(view) => tab.connection == connection && view.read(cx).table() == &table,
             TabView::Editor(_) => false,
         });
-        if let Some(tab) = open {
-            self.active = Some(tab.id);
-            cx.notify();
+        if let Some(id) = open.map(|tab| tab.id) {
+            self.show(id, window, cx);
             return;
         }
         let info = match self.navigator.read(cx).state(&connection) {
@@ -190,20 +250,109 @@ impl Workspace {
             _observer: cx.observe(&view, |_, _, cx| cx.notify()),
             view: TabView::Table(view),
         });
+        self.show(id, window, cx);
+    }
+
+    /// Shows tab `id` and moves the focus into it: an editor gets the cursor,
+    /// a table the workspace. The tab that held the focus may no longer be
+    /// drawn, and keys would then reach nothing.
+    fn show(&mut self, id: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.active = Some(id);
+        match self.active_editor() {
+            Some(editor) => editor.focus_handle(cx).focus(window, cx),
+            None => self.focus.focus(window, cx),
+        }
         cx.notify();
     }
 
-    fn close(&mut self, id: usize, cx: &mut Context<Self>) {
-        let Some(index) = self.tabs.iter().position(|tab| tab.id == id) else {
+    /// Focused, it keeps the workspace shortcuts working.
+    pub fn focus_handle(&self) -> FocusHandle {
+        self.focus.clone()
+    }
+
+    /// Closes the tabs `ids`, asking first when one holds edits that are not
+    /// saved.
+    fn request_close(&mut self, ids: Vec<usize>, window: &mut Window, cx: &mut Context<Self>) {
+        let pending = self.tabs.iter().any(|tab| {
+            ids.contains(&tab.id)
+                && matches!(&tab.view, TabView::Table(view) if view.read(cx).pending(cx) > 0)
+        });
+        if !pending {
+            self.close(&ids, window, cx);
             return;
-        };
-        self.tabs.remove(index);
-        if self.active == Some(id) {
-            let neighbour = index.min(self.tabs.len().saturating_sub(1));
-            self.active = self.tabs.get(neighbour).map(|tab| tab.id);
+        }
+        let workspace = cx.weak_entity();
+        common::confirm_delete(
+            t("Discard changes?"),
+            t("Closing the tab drops the changes that have not been saved."),
+            None,
+            t("Discard"),
+            window,
+            cx,
+            move |window, cx| {
+                let _ = workspace.update(cx, |this, cx| this.close(&ids, window, cx));
+            },
+        );
+    }
+
+    fn close(&mut self, ids: &[usize], window: &mut Window, cx: &mut Context<Self>) {
+        let shown = self.tabs.iter().position(|tab| Some(tab.id) == self.active);
+        self.tabs.retain(|tab| !ids.contains(&tab.id));
+        if let Some(index) = shown.filter(|_| self.active_tab().is_none()) {
+            // The closed tab held the focus; the one now in its place takes it.
+            match self.tabs.get(index.min(self.tabs.len().saturating_sub(1))) {
+                Some(tab) => self.show(tab.id, window, cx),
+                None => {
+                    self.active = None;
+                    self.focus.focus(window, cx);
+                }
+            }
         }
         cx.notify();
+    }
+
+    /// Opens `.sql` files, each in a new editor on the current connection.
+    fn open_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(connection) = self.editor_target(cx) else {
+            return;
+        };
+        let picked = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some(t("Open")),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = picked.await else {
+                return;
+            };
+            for path in paths {
+                let source = path.clone();
+                let read = backend(async move {
+                    tokio::fs::read_to_string(&source)
+                        .await
+                        .map_err(|error| format!("cannot read {}: {error}", source.display()))
+                })
+                .await;
+                let _ = this.update_in(cx, |this, window, cx| match read {
+                    Ok(text) => {
+                        let editor = this.open_editor(connection.clone(), window, cx);
+                        editor.update(cx, |editor, cx| editor.open_file(path, &text, window, cx));
+                    }
+                    Err(error) => window.push_notification(Notification::error(error), cx),
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Shows the tab `step` places after the one shown, wrapping around.
+    fn cycle(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(index) = self.tabs.iter().position(|tab| Some(tab.id) == self.active) else {
+            return;
+        };
+        let next = (index as isize + step).rem_euclid(self.tabs.len() as isize) as usize;
+        self.show(self.tabs[next].id, window, cx);
     }
 
     /// Where the `+` button opens an editor: the connection of the tab shown,
@@ -250,6 +399,11 @@ impl Workspace {
                 (view.is_busy(), view.pending(cx) > 0)
             }
         };
+        let transaction = self.store.read(cx).in_transaction(&tab.connection);
+        let ids: Vec<usize> = self.tabs.iter().map(|tab| tab.id).collect();
+        let index = ids.iter().position(|tab| *tab == id).unwrap_or(0);
+        let others: Vec<usize> = ids.iter().copied().filter(|tab| *tab != id).collect();
+        let workspace = cx.weak_entity();
         let state = if running {
             Some(ConnectionState::Connecting)
         } else {
@@ -281,10 +435,9 @@ impl Workspace {
                         .hover(|style| style.border_color(theme::STENCIL.opacity(0.25)))
                 }
             })
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_click(cx.listener(move |this, _, window, cx| {
                 if this.tabs.iter().any(|tab| tab.id == id) {
-                    this.active = Some(id);
-                    cx.notify();
+                    this.show(id, window, cx);
                 }
             }))
             .child(
@@ -303,8 +456,25 @@ impl Workspace {
                     .min_w_0()
                     .truncate()
                     .text_xs()
-                    .child(tab.title.clone()),
+                    .child(match &tab.view {
+                        TabView::Editor(editor) => {
+                            editor.read(cx).file_name().unwrap_or(tab.title.clone())
+                        }
+                        TabView::Table(_) => tab.title.clone(),
+                    }),
             )
+            .when(transaction, |tab| {
+                tab.child(
+                    div()
+                        .flex_shrink_0()
+                        .px_1()
+                        .rounded(theme::RADIUS)
+                        .bg(theme::PORT)
+                        .text_size(px(10.))
+                        .text_color(theme::AMBER_TEXT)
+                        .child("TX"),
+                )
+            })
             .child(state_shape(state.as_ref(), ink))
             .child(
                 Button::new(("close-tab", id))
@@ -312,12 +482,36 @@ impl Workspace {
                     .xsmall()
                     .icon(lucide("x"))
                     .tooltip(t("Close tab"))
-                    .on_click(cx.listener(move |this, _, _, cx| this.close(id, cx))),
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.request_close(vec![id], window, cx)
+                    })),
             )
+            .context_menu(move |menu, _, _| {
+                let close = |label: SharedString, targets: Vec<usize>| {
+                    let workspace = workspace.clone();
+                    PopupMenuItem::new(label)
+                        .disabled(targets.is_empty())
+                        .on_click(move |_, window, cx| {
+                            let targets = targets.clone();
+                            let _ = workspace
+                                .update(cx, |this, cx| this.request_close(targets, window, cx));
+                        })
+                };
+                menu.item(close(t("Close"), vec![id]))
+                    .item(close(t("Close Other Tabs"), others.clone()))
+                    .item(close(t("Close Tabs to the Left"), ids[..index].to_vec()))
+                    .item(close(
+                        t("Close Tabs to the Right"),
+                        ids[index + 1..].to_vec(),
+                    ))
+                    .separator()
+                    .item(close(t("Close All Tabs"), ids.clone()))
+            })
     }
 
     fn render_strip(&self, cx: &Context<Self>) -> impl IntoElement {
         let target = self.editor_target(cx);
+        let has_target = target.is_some();
         h_flex()
             .h_9()
             .flex_shrink_0()
@@ -348,6 +542,15 @@ impl Workspace {
                         }
                     })),
             )
+            .child(
+                Button::new("open-file")
+                    .ghost()
+                    .small()
+                    .icon(lucide("folder-open"))
+                    .tooltip(t("Open a .sql file (Cmd+O)"))
+                    .disabled(!has_target)
+                    .on_click(cx.listener(|this, _, window, cx| this.open_file(window, cx))),
+            )
     }
 
     fn render_status(&self, cx: &Context<Self>) -> impl IntoElement {
@@ -361,6 +564,7 @@ impl Workspace {
         } else {
             tf("{open} open", &[("open", &open.to_string())])
         };
+        let store = self.store.read(cx);
         let active = self.active_tab().map(|tab| {
             let identity = self.identity(&tab.connection, cx);
             let path = self
@@ -397,6 +601,14 @@ impl Workspace {
                         .when(held, |state| state.text_color(theme::RED_TEXT))
                         .child(state),
                 )
+                .when(store.in_transaction(&tab.connection), |line| {
+                    line.child(
+                        div()
+                            .flex_shrink_0()
+                            .text_color(theme::AMBER_TEXT)
+                            .child(t("Transaction open")),
+                    )
+                })
                 .children(summary.map(|summary| div().flex_shrink_0().child(summary)))
         });
 
@@ -453,6 +665,32 @@ impl Render for Workspace {
         };
         v_flex()
             .size_full()
+            .id("workspace")
+            .role(Role::Group)
+            .key_context(CONTEXT)
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &NewEditor, window, cx| {
+                if let Some(connection) = this.editor_target(cx) {
+                    this.open_editor(connection, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &OpenFile, window, cx| this.open_file(window, cx)))
+            .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
+                if let Some(id) = this.active {
+                    this.request_close(vec![id], window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &NextTab, window, cx| this.cycle(1, window, cx)))
+            .on_action(cx.listener(|this, _: &PreviousTab, window, cx| this.cycle(-1, window, cx)))
+            .on_action(cx.listener(|this, action: &SelectTab, window, cx| {
+                if let Some(id) = this.tabs.get(action.0).map(|tab| tab.id) {
+                    this.show(id, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &FilterTables, window, cx| {
+                this.navigator
+                    .update(cx, |navigator, cx| navigator.focus_filter(window, cx));
+            }))
             .child(self.render_strip(cx))
             .child(
                 div().flex_1().min_h_0().child(

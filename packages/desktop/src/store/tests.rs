@@ -289,3 +289,40 @@ async fn a_group_renames_merges_into_a_namesake_and_dissolves() {
     assert_eq!(connections.len(), 2, "dissolving keeps the connections");
     assert!(connections.iter().all(|row| row.group_id.is_none()));
 }
+
+#[tokio::test]
+async fn history_keeps_one_entry_per_sql_newest_first() {
+    let (app, _directory) = test_app();
+    let record = super::connections::connection_save(
+        shared::DbConnectionRecord {
+            name: "shop".to_string(),
+            driver: "sqlite".to_string(),
+            ..Default::default()
+        },
+        String::new(),
+        app.state(),
+    )
+    .await
+    .expect("save");
+    let add =
+        |sql: &str| super::history::history_add(record.id.clone(), sql.to_string(), app.state());
+    let list = || async {
+        super::history::history_list(record.id.clone(), app.state())
+            .await
+            .expect("list")
+            .into_iter()
+            .map(|entry| entry.sql)
+            .collect::<Vec<_>>()
+    };
+
+    add("SELECT 1").await.expect("add");
+    add("  ").await.expect("blank is skipped");
+    add("SELECT 2").await.expect("add");
+    add(" SELECT 1 ").await.expect("again");
+    assert_eq!(list().await, ["SELECT 1", "SELECT 2"]);
+
+    super::connections::connection_delete(record.id.clone(), app.state())
+        .await
+        .expect("delete");
+    assert!(list().await.is_empty(), "history goes with its connection");
+}

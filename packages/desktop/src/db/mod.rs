@@ -164,6 +164,22 @@ impl Session {
         }
     }
 
+    /// A transaction the user opened is still open, perhaps failed.
+    pub async fn in_transaction(&self) -> bool {
+        match self {
+            Session::Sqlite(session) => session.in_transaction().await,
+            Session::Postgres(session) => session.in_transaction().await,
+        }
+    }
+
+    /// The server ended the connection, or the network to it dropped.
+    pub fn is_closed(&self) -> bool {
+        match self {
+            Session::Sqlite(_) => false,
+            Session::Postgres(session) => session.is_closed(),
+        }
+    }
+
     /// Stops the statement that is running, if any.
     pub fn cancel(&self) {
         match self {
@@ -180,10 +196,14 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
-    /// The open session for `record`, opening one if there is none.
+    /// The open session for `record`, opening one if there is none or the
+    /// one there was has closed.
     pub async fn connect(&self, record: &DbConnectionRecord) -> Result<Session, String> {
         if let Some(session) = self.get(&record.id) {
-            return Ok(session);
+            if !session.is_closed() {
+                return Ok(session);
+            }
+            tracing::info!(connection = %record.id, "Reconnecting a closed session");
         }
         let session = Session::open(record).await?;
         self.sessions

@@ -46,6 +46,8 @@ impl PostgresSession {
             .user(&record.username)
             .password(&record.password)
             .application_name("noverdbee")
+            // Notice a dropped network within minutes, not the OS's two hours.
+            .keepalives_idle(std::time::Duration::from_secs(60))
             .ssl_mode(match record.ssl_mode.as_str() {
                 "disable" => SslMode::Disable,
                 "require" => SslMode::Require,
@@ -298,6 +300,25 @@ impl PostgresSession {
             .execute(sql, &[])
             .await
             .map_err(|error| describe(&error))
+    }
+
+    /// The driver does not expose the server's transaction status, so ask: in
+    /// a transaction block the transaction started before this statement did.
+    /// A failed transaction refuses the question, which answers it too.
+    pub async fn in_transaction(&self) -> bool {
+        let probe = "SELECT transaction_timestamp() <> statement_timestamp()";
+        match self.client.simple_query(probe).await {
+            Ok(messages) => messages.iter().any(|message| {
+                matches!(message, SimpleQueryMessage::Row(row) if row.get(0) == Some("t"))
+            }),
+            Err(error) => {
+                error.code() == Some(&tokio_postgres::error::SqlState::IN_FAILED_SQL_TRANSACTION)
+            }
+        }
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.client.is_closed()
     }
 
     pub fn cancel(&self) {

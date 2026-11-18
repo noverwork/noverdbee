@@ -98,6 +98,12 @@ impl SqliteSession {
         self.interrupt.interrupt();
     }
 
+    pub async fn in_transaction(&self) -> bool {
+        self.blocking(|connection| !connection.is_autocommit())
+            .await
+            .unwrap_or(false)
+    }
+
     /// Prepares each statement in `sql` without running it, and returns the
     /// first error with its byte offset. Skipped while a statement runs.
     // ponytail: a statement that needs an earlier one in `sql` to have run

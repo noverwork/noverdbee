@@ -46,6 +46,8 @@ pub fn init(app: AppHandle, cx: &mut App) {
     cx.set_global(store::Globals { store });
     shell::bind_keys(cx);
     views::selection::bind_keys(cx);
+    views::workspace::bind_keys(cx);
+    views::sql_editor::bind_keys(cx);
 }
 
 pub fn open_main_window(options: WindowOptions, cx: &mut App) -> Result<AnyWindowHandle> {

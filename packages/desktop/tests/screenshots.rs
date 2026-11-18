@@ -249,6 +249,12 @@ mod shots {
                 "editor-error",
                 "UPDATE orders SET note = 'checked' WHERE total > 100;\nSELECT * FROM orders WHERE;",
             ),
+            (
+                "editor-transaction",
+                "BEGIN;\nUPDATE orders SET note = 'held' WHERE id = 1;",
+            ),
+            // Leaves no transaction open for the pages that follow.
+            ("", "ROLLBACK;"),
         ] {
             stage
                 .cx
@@ -267,7 +273,9 @@ mod shots {
                 })
                 .ok();
             stage.settle(Duration::from_millis(500));
-            stage.shoot(name);
+            if !name.is_empty() {
+                stage.shoot(name);
+            }
         }
 
         // A table tab: its rows, then staged edits, then its structure.

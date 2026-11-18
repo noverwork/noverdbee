@@ -1,5 +1,7 @@
 //! App-wide UI state: saved data and the current page.
 
+use std::collections::HashSet;
+
 use gpui_kit::*;
 use shared::{DbConnectionRecord, GroupRecord, Setting};
 
@@ -26,6 +28,8 @@ pub struct Store {
     pub groups: Vec<GroupRecord>,
     pub connections: Vec<DbConnectionRecord>,
     pub settings: Vec<Setting>,
+    /// Connections whose session has a transaction open, as last checked.
+    pub transactions: HashSet<String>,
 }
 
 /// The store, reachable from any view.
@@ -49,6 +53,7 @@ impl Store {
             groups: Vec::new(),
             connections: Vec::new(),
             settings: Vec::new(),
+            transactions: HashSet::new(),
         };
         store.refresh(cx);
         store
@@ -101,6 +106,22 @@ impl Store {
             });
         })
         .detach();
+    }
+
+    pub fn in_transaction(&self, connection: &str) -> bool {
+        self.transactions.contains(connection)
+    }
+
+    /// Records whether `connection` has a transaction open.
+    pub fn set_transaction(&mut self, connection: &str, open: bool, cx: &mut Context<Self>) {
+        let changed = if open {
+            self.transactions.insert(connection.to_string())
+        } else {
+            self.transactions.remove(connection)
+        };
+        if changed {
+            cx.notify();
+        }
     }
 
     pub fn connection(&self, id: &str) -> Option<&DbConnectionRecord> {
