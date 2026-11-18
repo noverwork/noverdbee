@@ -46,6 +46,8 @@ impl PostgresSession {
             .user(&record.username)
             .password(&record.password)
             .application_name("noverdbee")
+            // Notice a dropped network within minutes, not the OS's two hours.
+            .keepalives_idle(std::time::Duration::from_secs(60))
             .ssl_mode(match record.ssl_mode.as_str() {
                 "disable" => SslMode::Disable,
                 "require" => SslMode::Require,
@@ -298,6 +300,10 @@ impl PostgresSession {
             .execute(sql, &[])
             .await
             .map_err(|error| describe(&error))
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.client.is_closed()
     }
 
     pub fn cancel(&self) {

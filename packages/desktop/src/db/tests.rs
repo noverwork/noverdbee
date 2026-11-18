@@ -476,3 +476,36 @@ async fn sqlite_paths_may_start_at_the_home_folder() {
     session.run("CREATE TABLE t (id INTEGER)".to_string()).await;
     assert!(directory.path().join("tilde.db").exists());
 }
+
+/// Needs a server, as above.
+#[tokio::test]
+async fn postgres_reopens_a_session_the_server_closed() {
+    let Ok(url) = std::env::var("NOVERDBEE_TEST_PG_URL") else {
+        eprintln!("skipped: NOVERDBEE_TEST_PG_URL is not set");
+        return;
+    };
+    let record = DbConnectionRecord {
+        id: "reconnect".to_string(),
+        ..pg_record(&url)
+    };
+    let manager = super::SessionManager::default();
+    let first = manager.connect(&record).await.expect("connect");
+    let killer = Session::open(&record).await.expect("second connection");
+    let pid = rows(&first, "SELECT pg_backend_pid()").await.rows[0][0].clone();
+    rows(
+        &killer,
+        &format!("SELECT pg_terminate_backend({})", pid.expect("a pid")),
+    )
+    .await;
+    for _ in 0..50 {
+        if first.is_closed() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(first.is_closed(), "the terminated session notices");
+
+    let second = manager.connect(&record).await.expect("reconnect");
+    assert!(!second.is_closed());
+    assert_eq!(rows(&second, "SELECT 1").await.rows, [cells(&[Some("1")])]);
+}

@@ -168,19 +168,33 @@ impl SqlEditor {
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
             let ran = backend(async move {
-                let session = app.state::<SessionManager>().connect(&record).await?;
+                let sessions = app.state::<SessionManager>();
+                let dropped = sessions.get(&record.id).is_some_and(|open| open.is_closed());
+                let session = sessions.connect(&record).await?;
                 let saved =
                     crate::store::history::history_add(record.id, sql.clone(), app.state()).await;
                 if let Err(error) = saved {
                     tracing::warn!(error, "Failed to save query history");
                 }
-                Ok::<_, String>(session.run(sql).await)
+                Ok::<_, String>((dropped, session.run(sql).await))
             })
             .await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.running = false;
                 match ran {
-                    Ok(results) => this.show(results, base, window, cx),
+                    Ok((dropped, results)) => {
+                        this.show(results, base, window, cx);
+                        if dropped {
+                            this.messages.insert(
+                                0,
+                                Message {
+                                    sql: SharedString::default(),
+                                    text: t("The connection had closed and was opened again. Anything uncommitted on it was lost."),
+                                    failed: false,
+                                },
+                            );
+                        }
+                    }
                     Err(error) => {
                         this.results.clear();
                         this.messages = vec![Message {

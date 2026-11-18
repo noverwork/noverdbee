@@ -146,5 +146,6 @@
  "Schemas": "Schema",
  "Schemas…": "Schema…",
  "History": "歷史紀錄",
- "Nothing has run on this connection yet.": "這個連線還沒有執行過任何 SQL。"
+ "Nothing has run on this connection yet.": "這個連線還沒有執行過任何 SQL。",
+ "The connection had closed and was opened again. Anything uncommitted on it was lost.": "連線曾中斷，已重新連上。之前未 commit 的變更都已遺失。"
 }
