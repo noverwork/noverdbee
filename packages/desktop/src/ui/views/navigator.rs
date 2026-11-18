@@ -112,6 +112,8 @@ pub struct Navigator {
     tree: Entity<TreeState>,
     filter: Entity<InputState>,
     states: HashMap<String, ConnectionState>,
+    /// The attempt behind each `Connecting` state; dropping one cancels it.
+    attempts: HashMap<String, Task<()>>,
     /// Rows the user opened or closed; the rest keep their default.
     expanded: HashMap<SharedString, bool>,
     nodes: Rc<HashMap<SharedString, Node>>,
@@ -146,6 +148,7 @@ impl Navigator {
             tree,
             filter,
             states: HashMap::new(),
+            attempts: HashMap::new(),
             expanded: HashMap::new(),
             nodes: Rc::default(),
             _subscriptions,
@@ -161,6 +164,14 @@ impl Navigator {
 
     pub fn state(&self, connection: &str) -> Option<&ConnectionState> {
         self.states.get(connection)
+    }
+
+    /// A connection that is being opened, if any.
+    pub fn connecting(&self) -> Option<&str> {
+        self.states
+            .iter()
+            .find(|(_, state)| matches!(state, ConnectionState::Connecting))
+            .map(|(id, _)| id.as_str())
     }
 
     /// How many connections are open, and how many failed to open.
@@ -183,7 +194,8 @@ impl Navigator {
         self.rebuild(cx);
         let app = self.store.read(cx).app();
         let name = record.name.clone();
-        cx.spawn(async move |this, cx| {
+        let attempt = id.clone();
+        let task = cx.spawn(async move |this, cx| {
             let loaded = backend(async move {
                 let session = app.state::<SessionManager>().connect(&record).await?;
                 session.tables().await
@@ -208,8 +220,8 @@ impl Navigator {
                 this.states.insert(id, state);
                 this.rebuild(cx);
             });
-        })
-        .detach();
+        });
+        self.attempts.insert(attempt, task);
     }
 
     pub fn disconnect(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -221,6 +233,9 @@ impl Navigator {
         self.store
             .update(cx, |store, cx| store.set_transaction(id, false, cx));
         self.states.remove(id);
+        // ponytail: the backend may still finish opening the session; the
+        // next connect reuses it. Abort the backend task if that ever matters.
+        self.attempts.remove(id);
         self.rebuild(cx);
     }
 
