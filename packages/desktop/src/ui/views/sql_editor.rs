@@ -1,5 +1,6 @@
 //! A SQL editor tab: the editor over its results and messages.
 
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -22,6 +23,19 @@ use crate::ui::store::{store, Store};
 use crate::ui::theme;
 use crate::ui::views::result_grid::{self, GridState};
 use crate::ui::views::sql_completion::SqlCompletion;
+
+actions!(noverdbee, [SaveFile]);
+
+const CONTEXT: &str = "SqlEditor";
+
+pub fn bind_keys(cx: &mut App) {
+    let save = if cfg!(target_os = "macos") {
+        "cmd-s"
+    } else {
+        "ctrl-s"
+    };
+    cx.bind_keys([KeyBinding::new(save, SaveFile, Some(CONTEXT))]);
+}
 
 /// How long typing pauses before the SQL is checked.
 const CHECK_DELAY: Duration = Duration::from_millis(500);
@@ -49,6 +63,8 @@ pub struct SqlEditor {
     running: bool,
     /// The pending check of the SQL; replacing it cancels the old one.
     check: Option<Task<()>>,
+    /// The `.sql` file the text was opened from or saved to.
+    file: Option<PathBuf>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -124,6 +140,7 @@ impl SqlEditor {
             active: 0,
             running: false,
             check: None,
+            file: None,
             _subscriptions,
         }
     }
@@ -137,6 +154,60 @@ impl SqlEditor {
         self.results
             .get(self.active)
             .map(|result| result.summary.clone())
+    }
+
+    /// The file's name, for the tab.
+    pub fn file_name(&self) -> Option<SharedString> {
+        let name = self.file.as_ref()?.file_name()?;
+        Some(name.to_string_lossy().into_owned().into())
+    }
+
+    /// Shows `text` read from `file`; saving writes back to it.
+    pub fn open_file(
+        &mut self,
+        file: PathBuf,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.file = Some(file);
+        self.set_text(text, window, cx);
+        cx.notify();
+    }
+
+    /// Writes the text to its file, asking for one the first time.
+    fn save_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.editor.read(cx).value().to_string();
+        let known = self.file.clone();
+        let picked = known.is_none().then(|| {
+            let folder = dirs::document_dir().unwrap_or_default();
+            cx.prompt_for_new_path(&folder, Some("query.sql"))
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let path = match (known, picked) {
+                (Some(path), _) => path,
+                (None, Some(picked)) => match picked.await {
+                    Ok(Ok(Some(path))) => path,
+                    _ => return,
+                },
+                (None, None) => return,
+            };
+            let target = path.clone();
+            let written = backend(async move {
+                tokio::fs::write(&target, text)
+                    .await
+                    .map_err(|error| format!("cannot write {}: {error}", target.display()))
+            })
+            .await;
+            let _ = this.update_in(cx, |this, window, cx| match written {
+                Ok(()) => {
+                    this.file = Some(path);
+                    cx.notify();
+                }
+                Err(error) => window.push_notification(Notification::error(error), cx),
+            });
+        })
+        .detach();
     }
 
     pub fn set_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -387,6 +458,14 @@ impl SqlEditor {
             .child(action)
             .child(self.render_transaction(cx))
             .child(div().flex_1())
+            .child(
+                Button::new("save-file")
+                    .ghost()
+                    .small()
+                    .icon(lucide("save"))
+                    .tooltip(t("Save to file (Cmd+S)"))
+                    .on_click(cx.listener(|this, _, window, cx| this.save_file(window, cx))),
+            )
             .child(
                 Button::new("history")
                     .ghost()
@@ -658,21 +737,26 @@ fn show_history(
 
 impl Render for SqlEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex().size_full().child(self.render_toolbar(cx)).child(
-            div().flex_1().min_h_0().child(
-                v_resizable("sql-editor")
-                    .child(
-                        resizable_panel().child(
-                            div().size_full().bg(theme::INK).child(
-                                Editor::new(&self.editor)
-                                    .h_full()
-                                    .appearance(false)
-                                    .bordered(false),
+        v_flex()
+            .size_full()
+            .key_context(CONTEXT)
+            .on_action(cx.listener(|this, _: &SaveFile, window, cx| this.save_file(window, cx)))
+            .child(self.render_toolbar(cx))
+            .child(
+                div().flex_1().min_h_0().child(
+                    v_resizable("sql-editor")
+                        .child(
+                            resizable_panel().child(
+                                div().size_full().bg(theme::INK).child(
+                                    Editor::new(&self.editor)
+                                        .h_full()
+                                        .appearance(false)
+                                        .bordered(false),
+                                ),
                             ),
-                        ),
-                    )
-                    .child(resizable_panel().child(self.render_results(cx))),
-            ),
-        )
+                        )
+                        .child(resizable_panel().child(self.render_results(cx))),
+                ),
+            )
     }
 }

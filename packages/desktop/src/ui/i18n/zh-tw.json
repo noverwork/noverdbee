@@ -159,5 +159,8 @@
  "Export CSV": "匯出 CSV",
  "Saved the first {rows} rows; the result was cut short.": "已存前 {rows} 列；結果有被截斷。",
  "Saved {rows} rows.": "已存 {rows} 列。",
- "Closing the tab drops the changes that have not been saved.": "關閉分頁會丟掉尚未儲存的變更。"
+ "Closing the tab drops the changes that have not been saved.": "關閉分頁會丟掉尚未儲存的變更。",
+ "Save to file (Cmd+S)": "存成檔案 (Cmd+S)",
+ "Open": "開啟",
+ "Open a .sql file (Cmd+O)": "開啟 .sql 檔 (Cmd+O)"
 }

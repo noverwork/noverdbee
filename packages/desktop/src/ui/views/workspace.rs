@@ -10,6 +10,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::db::TableRef;
+use crate::ui::bridge::backend;
 use crate::ui::i18n::{t, tf};
 use crate::ui::icons::lucide;
 use crate::ui::shell::page_label;
@@ -23,7 +24,14 @@ use crate::ui::views::table_view::TableView;
 
 actions!(
     noverdbee,
-    [NewEditor, CloseTab, NextTab, PreviousTab, FilterTables]
+    [
+        NewEditor,
+        OpenFile,
+        CloseTab,
+        NextTab,
+        PreviousTab,
+        FilterTables
+    ]
 );
 
 pub fn bind_keys(cx: &mut App) {
@@ -36,6 +44,7 @@ pub fn bind_keys(cx: &mut App) {
     let key = |keys: &str| format!("{modifier}-{keys}").leak() as &str;
     cx.bind_keys([
         KeyBinding::new(key("t"), NewEditor, Some(CONTEXT)),
+        KeyBinding::new(key("o"), OpenFile, Some(CONTEXT)),
         KeyBinding::new(key("w"), CloseTab, Some(CONTEXT)),
         KeyBinding::new(key("shift-]"), NextTab, Some(CONTEXT)),
         KeyBinding::new(key("shift-["), PreviousTab, Some(CONTEXT)),
@@ -115,7 +124,7 @@ impl Workspace {
                 window,
                 |this, _, event: &NavigatorEvent, window, cx| match event {
                     NavigatorEvent::NewEditor { connection } => {
-                        this.open_editor(connection.clone(), window, cx)
+                        this.open_editor(connection.clone(), window, cx);
                     }
                     // A connection that just opened gets an editor to start in.
                     NavigatorEvent::Connected { connection } => {
@@ -169,7 +178,12 @@ impl Workspace {
         })
     }
 
-    pub fn open_editor(&mut self, connection: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_editor(
+        &mut self,
+        connection: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<SqlEditor> {
         let editor = cx.new(|cx| SqlEditor::new(connection.clone(), window, cx));
         self.queries += 1;
         let id = self.next_tab;
@@ -179,10 +193,11 @@ impl Workspace {
             connection,
             title: tf("Query {number}", &[("number", &self.queries.to_string())]),
             _observer: cx.observe(&editor, |_, _, cx| cx.notify()),
-            view: TabView::Editor(editor),
+            view: TabView::Editor(editor.clone()),
         });
         self.active = Some(id);
         cx.notify();
+        editor
     }
 
     /// Shows the tab for `table`, opening one if there is none.
@@ -260,6 +275,41 @@ impl Workspace {
             self.focus.focus(window, cx);
         }
         cx.notify();
+    }
+
+    /// Opens `.sql` files, each in a new editor on the current connection.
+    fn open_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(connection) = self.editor_target(cx) else {
+            return;
+        };
+        let picked = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some(t("Open")),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = picked.await else {
+                return;
+            };
+            for path in paths {
+                let source = path.clone();
+                let read = backend(async move {
+                    tokio::fs::read_to_string(&source)
+                        .await
+                        .map_err(|error| format!("cannot read {}: {error}", source.display()))
+                })
+                .await;
+                let _ = this.update_in(cx, |this, window, cx| match read {
+                    Ok(text) => {
+                        let editor = this.open_editor(connection.clone(), window, cx);
+                        editor.update(cx, |editor, cx| editor.open_file(path, &text, window, cx));
+                    }
+                    Err(error) => window.push_notification(Notification::error(error), cx),
+                });
+            }
+        })
+        .detach();
     }
 
     /// Shows the tab `step` places after the one shown, wrapping around.
@@ -370,7 +420,12 @@ impl Workspace {
                     .min_w_0()
                     .truncate()
                     .text_xs()
-                    .child(tab.title.clone()),
+                    .child(match &tab.view {
+                        TabView::Editor(editor) => {
+                            editor.read(cx).file_name().unwrap_or(tab.title.clone())
+                        }
+                        TabView::Table(_) => tab.title.clone(),
+                    }),
             )
             .when(transaction, |tab| {
                 tab.child(
@@ -399,6 +454,7 @@ impl Workspace {
 
     fn render_strip(&self, cx: &Context<Self>) -> impl IntoElement {
         let target = self.editor_target(cx);
+        let has_target = target.is_some();
         h_flex()
             .h_9()
             .flex_shrink_0()
@@ -428,6 +484,15 @@ impl Workspace {
                             this.open_editor(connection, window, cx);
                         }
                     })),
+            )
+            .child(
+                Button::new("open-file")
+                    .ghost()
+                    .small()
+                    .icon(lucide("folder-open"))
+                    .tooltip(t("Open a .sql file (Cmd+O)"))
+                    .disabled(!has_target)
+                    .on_click(cx.listener(|this, _, window, cx| this.open_file(window, cx))),
             )
     }
 
@@ -550,6 +615,7 @@ impl Render for Workspace {
                     this.open_editor(connection, window, cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &OpenFile, window, cx| this.open_file(window, cx)))
             .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
                 if let Some(id) = this.active {
                     this.request_close(id, window, cx);
