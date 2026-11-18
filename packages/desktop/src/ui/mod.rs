@@ -79,6 +79,10 @@ pub fn run(app: AppHandle) {
             }
         })
         .detach();
+        cx.on_action(|_: &shell::Quit, cx| cx.quit());
+        cx.set_menus([
+            Menu::new("noverdbee").items([MenuItem::action("Quit noverdbee", shell::Quit)])
+        ]);
         cx.activate(true);
     });
 }

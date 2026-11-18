@@ -14,7 +14,7 @@ use crate::ui::theme;
 use crate::ui::views;
 use crate::ui::views::workspace::Workspace;
 
-actions!(noverdbee, [OpenSettings]);
+actions!(noverdbee, [OpenSettings, Quit]);
 
 pub fn bind_keys(cx: &mut App) {
     // Cmd on macOS; Ctrl elsewhere.
@@ -28,6 +28,9 @@ pub fn bind_keys(cx: &mut App) {
         OpenSettings,
         None,
     )]);
+    if cfg!(target_os = "macos") {
+        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+    }
 }
 
 pub struct Shell {
