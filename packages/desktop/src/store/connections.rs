@@ -56,6 +56,16 @@ pub async fn connection_save(
                     mcp_insert: record.mcp.insert,
                     mcp_update: record.mcp.update,
                     mcp_delete: record.mcp.delete,
+                    tunnel: record.tunnel,
+                    ssh_host: record.ssh_host,
+                    ssh_port: record.ssh_port,
+                    ssh_user: record.ssh_user,
+                    ssh_password: record.ssh_password,
+                    ssh_key_path: record.ssh_key_path,
+                    kube_context: record.kube_context,
+                    kube_namespace: record.kube_namespace,
+                    kube_resource: record.kube_resource,
+                    kube_config: record.kube_config,
                     updated_at: now,
                 };
                 let saved = if record.id.is_empty() {
@@ -152,5 +162,15 @@ fn to_record(row: DbConnection) -> DbConnectionRecord {
             update: row.mcp_update,
             delete: row.mcp_delete,
         },
+        tunnel: row.tunnel,
+        ssh_host: row.ssh_host,
+        ssh_port: row.ssh_port,
+        ssh_user: row.ssh_user,
+        ssh_password: row.ssh_password,
+        ssh_key_path: row.ssh_key_path,
+        kube_context: row.kube_context,
+        kube_namespace: row.kube_namespace,
+        kube_resource: row.kube_resource,
+        kube_config: row.kube_config,
     }
 }

@@ -27,6 +27,17 @@ pub struct DbConnection {
     pub mcp_insert: bool,
     pub mcp_update: bool,
     pub mcp_delete: bool,
+    /// Empty connects directly; otherwise `ssh` or `kubernetes`.
+    pub tunnel: String,
+    pub ssh_host: String,
+    pub ssh_port: i32,
+    pub ssh_user: String,
+    pub ssh_password: String,
+    pub ssh_key_path: String,
+    pub kube_context: String,
+    pub kube_namespace: String,
+    pub kube_resource: String,
+    pub kube_config: String,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -58,5 +69,16 @@ pub struct UpdateDbConnection {
     pub mcp_insert: bool,
     pub mcp_update: bool,
     pub mcp_delete: bool,
+    /// Empty connects directly; otherwise `ssh` or `kubernetes`.
+    pub tunnel: String,
+    pub ssh_host: String,
+    pub ssh_port: i32,
+    pub ssh_user: String,
+    pub ssh_password: String,
+    pub ssh_key_path: String,
+    pub kube_context: String,
+    pub kube_namespace: String,
+    pub kube_resource: String,
+    pub kube_config: String,
     pub updated_at: NaiveDateTime,
 }

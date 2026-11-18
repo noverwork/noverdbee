@@ -611,3 +611,97 @@ async fn postgres_a_read_only_connection_refuses_writes() {
         .expect("reads still work");
     assert_eq!(rows.len(), 1);
 }
+
+/// Needs a server behind an SSH server: set `NOVERDBEE_TEST_PG_URL` to the
+/// database as the SSH server sees it, and `NOVERDBEE_TEST_SSH` to
+/// `user:password@host:port`. Skipped otherwise. Adds the SSH server to
+/// ~/.ssh/known_hosts.
+#[tokio::test]
+async fn postgres_connects_through_an_ssh_tunnel() {
+    let (Ok(url), Ok(ssh)) = (
+        std::env::var("NOVERDBEE_TEST_PG_URL"),
+        std::env::var("NOVERDBEE_TEST_SSH"),
+    ) else {
+        eprintln!("skipped: NOVERDBEE_TEST_PG_URL or NOVERDBEE_TEST_SSH is not set");
+        return;
+    };
+    let (login, address) = ssh.split_once('@').expect("user:password@host:port");
+    let (user, password) = login.split_once(':').expect("user:password");
+    let (host, port) = address.rsplit_once(':').expect("host:port");
+    let record = DbConnectionRecord {
+        tunnel: super::tunnel::TUNNEL_SSH.to_string(),
+        ssh_host: host.to_string(),
+        ssh_port: port.parse().expect("an SSH port"),
+        ssh_user: user.to_string(),
+        ssh_password: password.to_string(),
+        ..pg_record(&url)
+    };
+    let session = Session::open(&record).await.expect("connect through SSH");
+    let version = session.version().await.expect("version");
+    assert!(version.starts_with("PostgreSQL "), "{version}");
+    // The parse-only second connection goes through the tunnel too.
+    assert!(session.check("SELECT 1".to_string()).await.is_none());
+
+    // `NOVERDBEE_TEST_SSH_KEY`: a private key the SSH server accepts.
+    if let Ok(key) = std::env::var("NOVERDBEE_TEST_SSH_KEY") {
+        let with_key = DbConnectionRecord {
+            ssh_key_path: key,
+            ssh_password: String::new(),
+            ..record.clone()
+        };
+        let session = Session::open(&with_key)
+            .await
+            .expect("connect with the key");
+        session.version().await.expect("version");
+    }
+
+    let wrong = DbConnectionRecord {
+        ssh_password: "wrong".to_string(),
+        ..record
+    };
+    let refused = Session::open(&wrong).await.expect_err("a wrong password");
+    assert!(refused.contains("rejected"), "{refused}");
+}
+
+/// Needs a server in a Kubernetes cluster: set `NOVERDBEE_TEST_PG_URL` (its
+/// host and port are not used), `NOVERDBEE_TEST_KUBECONFIG` to a kubeconfig
+/// file, and `NOVERDBEE_TEST_KUBE` to the targets, as
+/// `namespace/svc/name:port,namespace/pod/name:port`. Skipped otherwise.
+#[tokio::test]
+async fn postgres_connects_through_a_kubernetes_forward() {
+    let (Ok(url), Ok(kubeconfig), Ok(targets)) = (
+        std::env::var("NOVERDBEE_TEST_PG_URL"),
+        std::env::var("NOVERDBEE_TEST_KUBECONFIG"),
+        std::env::var("NOVERDBEE_TEST_KUBE"),
+    ) else {
+        eprintln!("skipped: NOVERDBEE_TEST_KUBECONFIG or NOVERDBEE_TEST_KUBE is not set");
+        return;
+    };
+    let kube_config = std::fs::read_to_string(kubeconfig).expect("the kubeconfig file");
+    for target in targets.split(',') {
+        let (namespace, rest) = target.split_once('/').expect("namespace/kind/name:port");
+        let (resource, port) = rest.rsplit_once(':').expect("kind/name:port");
+        let record = DbConnectionRecord {
+            tunnel: super::tunnel::TUNNEL_KUBERNETES.to_string(),
+            kube_config: kube_config.clone(),
+            kube_namespace: namespace.to_string(),
+            kube_resource: resource.to_string(),
+            port: port.parse().expect("a port"),
+            ..pg_record(&url)
+        };
+        let session = Session::open(&record)
+            .await
+            .unwrap_or_else(|error| panic!("{target}: {error}"));
+        let version = session.version().await.expect("version");
+        assert!(version.starts_with("PostgreSQL "), "{target}: {version}");
+        // The parse-only second connection goes through the forward too.
+        assert!(session.check("SELECT 1".to_string()).await.is_none());
+
+        let missing = DbConnectionRecord {
+            kube_resource: "svc/noverdbee-no-such-service".to_string(),
+            ..record
+        };
+        let refused = Session::open(&missing).await.expect_err("no such service");
+        assert!(refused.starts_with("cannot find svc/"), "{refused}");
+    }
+}

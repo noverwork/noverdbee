@@ -30,6 +30,16 @@ diesel::table! {
         mcp_insert -> Bool,
         mcp_update -> Bool,
         mcp_delete -> Bool,
+        tunnel -> Text,
+        ssh_host -> Text,
+        ssh_port -> Integer,
+        ssh_user -> Text,
+        ssh_password -> Text,
+        ssh_key_path -> Text,
+        kube_context -> Text,
+        kube_namespace -> Text,
+        kube_resource -> Text,
+        kube_config -> Text,
     }
 }
 
