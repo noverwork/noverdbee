@@ -109,6 +109,14 @@ impl Session {
         }
     }
 
+    /// Parses `sql` without running it; the first error and its byte offset.
+    pub async fn check(&self, sql: String) -> Option<(String, usize)> {
+        match self {
+            Session::Sqlite(session) => session.check(sql).await,
+            Session::Postgres(session) => session.check(sql).await,
+        }
+    }
+
     /// Every table and view with its columns.
     // ponytail: loads all columns up front; load them per table on expand if a
     // schema with thousands of tables makes connecting slow.

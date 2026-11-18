@@ -1,5 +1,8 @@
 //! A SQL editor tab: the editor over its results and messages.
 
+use std::rc::Rc;
+use std::time::Duration;
+
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::highlighter::Diagnostic;
 use gpui_kit::component::input::{Editor, EditorState, InputEvent, RopeExt as _};
@@ -15,6 +18,10 @@ use crate::ui::icons::lucide;
 use crate::ui::store::{store, Store};
 use crate::ui::theme;
 use crate::ui::views::result_grid::{self, GridState};
+use crate::ui::views::sql_completion::SqlCompletion;
+
+/// How long typing pauses before the SQL is checked.
+const CHECK_DELAY: Duration = Duration::from_millis(500);
 
 struct ResultTab {
     grid: Entity<GridState>,
@@ -37,6 +44,8 @@ pub struct SqlEditor {
     /// The result tab shown; `results.len()` is the Messages tab.
     active: usize,
     running: bool,
+    /// The pending check of the SQL; replacing it cancels the old one.
+    check: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -64,26 +73,51 @@ impl SqlEditor {
                 InputEvent::PressEnter {
                     secondary: true, ..
                 } => this.run(window, cx),
-                // The error marker points into text that has now moved.
-                InputEvent::Change => editor.update(cx, |editor, cx| {
-                    if let Some(diagnostics) = editor.diagnostics_mut() {
-                        if !diagnostics.is_empty() {
-                            diagnostics.clear();
-                            cx.notify();
+                InputEvent::Change => {
+                    // The error marker points into text that has now moved.
+                    editor.update(cx, |editor, cx| {
+                        if let Some(diagnostics) = editor.diagnostics_mut() {
+                            if !diagnostics.is_empty() {
+                                diagnostics.clear();
+                                cx.notify();
+                            }
                         }
-                    }
-                }),
+                    });
+                    this.schedule_check(cx);
+                }
                 _ => {}
             },
         )];
+        let completion = Rc::new(SqlCompletion::default());
+        editor.update(cx, |editor, _| {
+            editor.lsp_mut().completion_provider = Some(completion.clone());
+        });
+        // Completion offers nothing but keywords until the tables load.
+        let store = store(cx);
+        if let Some(record) = store.read(cx).connection(&connection).cloned() {
+            let app = store.read(cx).app();
+            cx.spawn(async move |_, _| {
+                let loaded = backend(async move {
+                    let session = app.state::<SessionManager>().connect(&record).await?;
+                    session.tables().await
+                })
+                .await;
+                match loaded {
+                    Ok(tables) => *completion.tables.borrow_mut() = tables,
+                    Err(error) => tracing::warn!(%error, "cannot load tables for completion"),
+                }
+            })
+            .detach();
+        }
         Self {
-            store: store(cx),
+            store,
             connection,
             editor,
             results: Vec::new(),
             messages: Vec::new(),
             active: 0,
             running: false,
+            check: None,
             _subscriptions,
         }
     }
@@ -215,13 +249,45 @@ impl SqlEditor {
             0
         };
 
+        self.mark(error.and_then(|(message, at)| Some((message, at?))), cx);
+    }
+
+    /// Has the database parse the SQL once typing pauses, and marks what it
+    /// rejects.
+    fn schedule_check(&mut self, cx: &mut Context<Self>) {
+        let app = self.store.read(cx).app();
+        let Some(session) = app.state::<SessionManager>().get(&self.connection) else {
+            self.check = None;
+            return;
+        };
+        let sql = self.editor.read(cx).value().to_string();
+        if sql.trim().is_empty() {
+            self.check = None;
+            return;
+        }
+        self.check = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(CHECK_DELAY).await;
+            let checked = sql.clone();
+            let found = backend(async move { session.check(checked).await }).await;
+            let _ = this.update(cx, |this, cx| {
+                // The text changed again, or a run marked its own error.
+                if this.editor.read(cx).value().as_ref() != sql || this.running {
+                    return;
+                }
+                this.mark(found, cx);
+            });
+        }));
+    }
+
+    /// Marks `error` at its byte offset in the editor, or clears the mark.
+    fn mark(&self, error: Option<(String, usize)>, cx: &mut Context<Self>) {
         self.editor.update(cx, |editor, cx| {
-            let marker = error.and_then(|(message, at)| {
-                let at = at?.min(editor.text().len());
+            let marker = error.map(|(message, at)| {
+                let at = at.min(editor.text().len());
                 let end = (at + 1).min(editor.text().len());
                 let range =
                     editor.text().offset_to_position(at)..editor.text().offset_to_position(end);
-                Some(Diagnostic::new(range, message))
+                Diagnostic::new(range, message)
             });
             if let Some(diagnostics) = editor.diagnostics_mut() {
                 diagnostics.clear();

@@ -2,6 +2,8 @@
 //! literals rather than bound parameters, so the statement shown for review is
 //! exactly the statement that runs.
 
+use std::ops::Range;
+
 /// A cell value: `None` is NULL.
 pub type Value = Option<String>;
 
@@ -130,6 +132,119 @@ pub fn insert(table: &TableRef, values: &[(String, Value)]) -> String {
     )
 }
 
+/// The byte ranges of the statements in `sql`: it splits at semicolons outside
+/// strings, quoted names, comments, and PostgreSQL dollar quotes. Blank
+/// statements are left out.
+pub fn split_statements(sql: &str) -> Vec<Range<usize>> {
+    let mut statements = scan(sql).0;
+    statements.retain(|range| !sql[range.clone()].trim().is_empty());
+    statements
+}
+
+/// Whether a cursor at byte `offset` sits inside a string, a quoted name, a
+/// comment, or a dollar-quoted body.
+pub fn in_literal(sql: &str, offset: usize) -> bool {
+    scan(sql).1.iter().any(|inside| inside.contains(&offset))
+}
+
+/// The statements of `sql`, and the cursor offsets that fall inside
+/// something other than SQL code.
+fn scan(sql: &str) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
+    let bytes = sql.as_bytes();
+    let ident = |byte: u8| byte == b'_' || byte.is_ascii_alphanumeric() || byte >= 0x80;
+    let mut statements = Vec::new();
+    let mut literals = Vec::new();
+    let mut start = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        let from = at;
+        // Whether a cursor at the very end is still inside: true for a line
+        // comment and for anything left unclosed.
+        let mut open = true;
+        match bytes[at] {
+            quote @ (b'\'' | b'"') => {
+                // Only E'...' strings treat a backslash as an escape.
+                let escapes = quote == b'\''
+                    && at > 0
+                    && bytes[at - 1].eq_ignore_ascii_case(&b'e')
+                    && (at < 2 || !ident(bytes[at - 2]));
+                at += 1;
+                while at < bytes.len() {
+                    if escapes && bytes[at] == b'\\' {
+                        at += 2;
+                    } else if bytes[at] == quote {
+                        at += 1;
+                        // A doubled quote stands for itself.
+                        if bytes.get(at) != Some(&quote) {
+                            open = false;
+                            break;
+                        }
+                        at += 1;
+                    } else {
+                        at += 1;
+                    }
+                }
+            }
+            b'-' if bytes.get(at + 1) == Some(&b'-') => {
+                at = sql[at..].find('\n').map_or(bytes.len(), |end| at + end);
+            }
+            b'/' if bytes.get(at + 1) == Some(&b'*') => {
+                // PostgreSQL nests block comments.
+                let mut depth = 0;
+                while at < bytes.len() {
+                    if bytes[at..].starts_with(b"/*") {
+                        depth += 1;
+                        at += 2;
+                    } else if bytes[at..].starts_with(b"*/") {
+                        depth -= 1;
+                        at += 2;
+                        if depth == 0 {
+                            open = false;
+                            break;
+                        }
+                    } else {
+                        at += 1;
+                    }
+                }
+            }
+            b'$' => {
+                // `$tag$` or `$$`; `$1` is a parameter.
+                let mut end = at + 1;
+                if bytes.get(end).is_some_and(|byte| !byte.is_ascii_digit()) {
+                    while bytes.get(end).copied().is_some_and(ident) {
+                        end += 1;
+                    }
+                }
+                if bytes.get(end) != Some(&b'$') {
+                    at += 1;
+                    continue;
+                }
+                let tag = &sql[at..=end];
+                at = match sql[end + 1..].find(tag) {
+                    Some(close) => {
+                        open = false;
+                        end + 1 + close + tag.len()
+                    }
+                    None => bytes.len(),
+                };
+            }
+            b';' => {
+                statements.push(start..at);
+                at += 1;
+                start = at;
+                continue;
+            }
+            _ => {
+                at += 1;
+                continue;
+            }
+        }
+        literals.push(from + 1..at.min(bytes.len()) + usize::from(open));
+    }
+    statements.push(start..bytes.len());
+    (statements, literals)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +313,59 @@ mod tests {
             ),
             r#"SELECT * FROM "users" WHERE age > 30 ORDER BY "name" DESC LIMIT 200 OFFSET 400"#
         );
+    }
+    #[test]
+    fn splits_statements_outside_quotes_and_comments() {
+        let split = |sql: &str| {
+            split_statements(sql)
+                .into_iter()
+                .map(|range| sql[range].trim().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(split("SELECT 1; SELECT 2;\n"), ["SELECT 1", "SELECT 2"]);
+        assert_eq!(split("SELECT 'a;b', \"c;d\"; ;"), ["SELECT 'a;b', \"c;d\""]);
+        assert_eq!(
+            split("SELECT 'it''s;'; SELECT E'\\';'"),
+            ["SELECT 'it''s;'", "SELECT E'\\';'"]
+        );
+        assert_eq!(
+            split("SELECT 1 -- a;b\n; /* c; /* d; */ e; */ SELECT 2"),
+            ["SELECT 1 -- a;b", "/* c; /* d; */ e; */ SELECT 2"]
+        );
+        assert_eq!(
+            split("CREATE FUNCTION f() RETURNS int AS $body$ SELECT 1; $body$ LANGUAGE sql; SELECT $$;$$, $1"),
+            ["CREATE FUNCTION f() RETURNS int AS $body$ SELECT 1; $body$ LANGUAGE sql", "SELECT $$;$$, $1"]
+        );
+        // `e'` inside a name is not an escape string.
+        assert_eq!(
+            split("SELECT name'a\\'; SELECT 2"),
+            ["SELECT name'a\\'", "SELECT 2"]
+        );
+        assert_eq!(
+            split("SELECT 'unterminated; SELECT 2"),
+            ["SELECT 'unterminated; SELECT 2"]
+        );
+    }
+
+    #[test]
+    fn knows_when_a_cursor_is_inside_a_string_or_comment() {
+        // Each `|` is a cursor: true inside, false outside.
+        let cases: [(&str, &[bool]); 3] = [
+            ("SELECT |'a|b|'| x|", &[false, true, true, false, false]),
+            ("SELECT 1 |-- n|o|\n|x", &[false, true, true, false]),
+            (
+                "SELECT /* a|b */| $$x|$$ |'open|",
+                &[true, false, true, false, true],
+            ),
+        ];
+        for (marked, expected) in cases {
+            let sql = marked.replace('|', "");
+            let found: Vec<bool> = marked
+                .match_indices('|')
+                .enumerate()
+                .map(|(n, (at, _))| in_literal(&sql, at - n))
+                .collect();
+            assert_eq!(found, expected, "{marked}");
+        }
     }
 }
