@@ -7,6 +7,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::highlighter::Diagnostic;
 use gpui_kit::component::input::{Editor, EditorState, InputEvent, RopeExt as _};
 use gpui_kit::component::list::ListItem;
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::resizable::{resizable_panel, v_resizable};
 use gpui_kit::component::{h_flex, v_flex, Disableable as _, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -243,10 +244,7 @@ impl SqlEditor {
             .await;
             let _ = this.update_in(cx, |_, window, cx| match loaded {
                 Ok(entries) => show_history(entries, cx.weak_entity(), window, cx),
-                Err(error) => window.push_notification(
-                    gpui_kit::component::notification::Notification::error(error),
-                    cx,
-                ),
+                Err(error) => window.push_notification(Notification::error(error), cx),
             });
         })
         .detach();
@@ -468,6 +466,55 @@ impl SqlEditor {
                 )
             }))
             .child(tab(self.results.len(), t("MESSAGES")))
+            .child(div().flex_1())
+            .when(self.active < self.results.len(), |bar| {
+                bar.child(
+                    Button::new("export-csv")
+                        .ghost()
+                        .xsmall()
+                        .icon(lucide("file-down"))
+                        .label(t("Export CSV"))
+                        .on_click(cx.listener(|this, _, window, cx| this.export_csv(window, cx))),
+                )
+            })
+    }
+
+    /// Saves the result shown as a CSV file the user names.
+    fn export_csv(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(result) = self.results.get(self.active) else {
+            return;
+        };
+        let result = result.grid.read(cx).delegate().result();
+        let (csv, rows, truncated) = (
+            result_grid::to_csv(result),
+            result.rows.len().to_string(),
+            result.truncated,
+        );
+        let folder = dirs::download_dir().unwrap_or_default();
+        let picked = cx.prompt_for_new_path(&folder, Some("result.csv"));
+        cx.spawn_in(window, async move |_, cx| {
+            let Ok(Ok(Some(path))) = picked.await else {
+                return;
+            };
+            let written = backend(async move {
+                tokio::fs::write(&path, csv)
+                    .await
+                    .map_err(|error| format!("cannot write {}: {error}", path.display()))
+            })
+            .await;
+            let _ = cx.update(|window, cx| {
+                let notification = match written {
+                    Ok(()) if truncated => Notification::warning(tf(
+                        "Saved the first {rows} rows; the result was cut short.",
+                        &[("rows", &rows)],
+                    )),
+                    Ok(()) => Notification::success(tf("Saved {rows} rows.", &[("rows", &rows)])),
+                    Err(error) => Notification::error(error),
+                };
+                window.push_notification(notification, cx);
+            });
+        })
+        .detach();
     }
 
     fn render_messages(&self) -> impl IntoElement {

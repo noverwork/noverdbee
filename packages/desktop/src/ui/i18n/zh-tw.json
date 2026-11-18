@@ -155,5 +155,8 @@
  "Transaction open": "交易進行中",
  "Roll back and disconnect?": "要 rollback 並中斷連線嗎？",
  "A transaction is open on this connection. Disconnecting rolls it back.": "這個連線有進行中的交易，中斷連線會 rollback。",
- "Roll back": "Rollback"
+ "Roll back": "Rollback",
+ "Export CSV": "匯出 CSV",
+ "Saved the first {rows} rows; the result was cut short.": "已存前 {rows} 列；結果有被截斷。",
+ "Saved {rows} rows.": "已存 {rows} 列。"
 }

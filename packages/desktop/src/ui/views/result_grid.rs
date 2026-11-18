@@ -270,9 +270,52 @@ pub fn row_count(result: &ResultSet) -> SharedString {
     }
 }
 
+/// `result` as CSV (RFC 4180): a header line, then one line per row. A NULL
+/// is an empty field; quotes go around a value that needs them.
+pub fn to_csv(result: &ResultSet) -> String {
+    let field = |text: &str| {
+        if text.contains([',', '"', '\n', '\r']) {
+            format!("\"{}\"", text.replace('"', "\"\""))
+        } else {
+            text.to_string()
+        }
+    };
+    let header = result.columns.iter().map(|column| field(&column.name));
+    let mut lines = vec![header.collect::<Vec<_>>().join(",")];
+    lines.extend(result.rows.iter().map(|row| {
+        row.iter()
+            .map(|value| value.as_deref().map(field).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join(",")
+    }));
+    lines.join("\r\n") + "\r\n"
+}
+
 #[cfg(test)]
 mod tests {
-    use super::compare;
+    use super::{compare, to_csv};
+    use crate::db::{Column, ResultSet};
+
+    #[test]
+    fn csv_quotes_what_needs_it_and_leaves_null_empty() {
+        let column = |name: &str| Column {
+            name: name.to_string(),
+            type_name: String::new(),
+            numeric: false,
+        };
+        let result = ResultSet {
+            columns: vec![column("id"), column("note, short")],
+            rows: vec![
+                vec![Some("1".to_string()), Some("say \"hi\"\nbye".to_string())],
+                vec![Some("2".to_string()), None],
+            ],
+            truncated: false,
+        };
+        assert_eq!(
+            to_csv(&result),
+            "id,\"note, short\"\r\n1,\"say \"\"hi\"\"\nbye\"\r\n2,\r\n"
+        );
+    }
     use std::cmp::Ordering;
 
     #[test]
