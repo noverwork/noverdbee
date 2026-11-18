@@ -1,0 +1,1435 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Noverdbee – Open-Source PostgreSQL and SQLite Client with an MCP Server</title>
+    <meta
+      name="description"
+      content="Noverdbee is an open-source desktop database client for PostgreSQL and SQLite with a built-in MCP server, so Claude Code, Cursor and other AI agents can query your databases with the access you allow. SQL editor, result grid, staged row edits and environment-coloured tabs on macOS, Windows and Linux. Local-first, no account, MIT licensed."
+    />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://noverwork.github.io/noverdbee/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://noverwork.github.io/noverdbee/" />
+    <meta property="og:title" content="Noverdbee – Databases for you and your AI" />
+    <meta
+      property="og:description"
+      content="An open-source PostgreSQL and SQLite client with a built-in MCP server, so you and your AI agent work the same databases from one app."
+    />
+    <meta property="og:image" content="https://noverwork.github.io/noverdbee/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Noverdbee – Databases for you and your AI" />
+    <meta name="twitter:description" content="An open-source PostgreSQL and SQLite client with a built-in MCP server, so you and your AI agent work the same databases from one app." />
+    <meta name="twitter:image" content="https://noverwork.github.io/noverdbee/og-image.png" />
+    <link rel="icon" href="favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@500;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Noverdbee",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Windows, Linux",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "url": "https://noverwork.github.io/noverdbee/",
+        "downloadUrl": "https://github.com/noverwork/noverdbee/releases",
+        "image": "https://noverwork.github.io/noverdbee/og-image.png",
+        "license": "https://opensource.org/licenses/MIT"
+      }
+    </script>
+    <style>
+      :root {
+        color-scheme: dark;
+        /* Brand palette (DESIGN.md) */
+        --port: #101317;
+        --rail: #0b0e11;
+        --rib: #1a1f25;
+        --stencil: #e8e4d8;
+        --stencil-dim: #c1beb5;
+        --stencil-mute: #9f9d96;
+        --rust: #a33b28;
+        --harbour: #2a648f;
+        --evergreen: #336a41;
+        --ochre: #c9952e;
+        --ochre-text: #e6c27a;
+        --graphite: #2a2f36;
+
+        --ground: var(--port);
+        --ink: var(--stencil);
+        --muted: var(--stencil-mute);
+
+        --display: "Libre Franklin", "Helvetica Neue", Arial, sans-serif;
+        --text: "Source Serif 4", Georgia, serif;
+        --code: ui-monospace, Menlo, Monaco, Consolas, monospace;
+
+        --step-body: clamp(1.0625rem, 1rem + 0.25vw, 1.1875rem);
+        --step-lead: clamp(1.25rem, 1.1rem + 0.7vw, 1.625rem);
+        --step-head: clamp(2rem, 1.3rem + 3.2vw, 4rem);
+        --step-hero: clamp(2.5rem, 1.2rem + 4.4vw, 5.5rem);
+
+        --m: clamp(16px, 2vw, 28px);
+        --gap: clamp(120px, 14vw, 200px);
+        --r: 2px;
+        --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        background: var(--ground);
+        color: var(--ink);
+        font-family: var(--text);
+        font-size: var(--step-body);
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
+      }
+      img {
+        display: block;
+        max-width: 100%;
+      }
+      a {
+        color: inherit;
+      }
+      h1,
+      h2,
+      h3 {
+        font-family: var(--display);
+        font-weight: 700;
+        letter-spacing: -0.035em;
+        line-height: 0.95;
+        margin: 0;
+      }
+      p {
+        margin: 0;
+      }
+      code {
+        font-family: var(--code);
+        font-size: 0.9em;
+      }
+      :focus-visible {
+        outline: 2px solid var(--stencil);
+        outline-offset: 3px;
+      }
+      ::selection {
+        background: var(--ochre);
+        color: var(--port);
+      }
+      .skip {
+        position: absolute;
+        left: -999px;
+      }
+      .skip:focus {
+        left: var(--m);
+        top: var(--m);
+        z-index: 10;
+        background: var(--stencil);
+        color: var(--port);
+        padding: 8px 12px;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 52px;
+        padding: 0 28px;
+        border-radius: var(--r);
+        background: var(--port);
+        color: var(--stencil);
+        font-family: var(--display);
+        font-size: 1rem;
+        letter-spacing: -0.01em;
+        text-decoration: none;
+        transition:
+          transform 160ms var(--ease),
+          background-color 160ms var(--ease);
+      }
+      .btn:hover {
+        background: var(--rust);
+      }
+      .btn:active {
+        transform: translateY(1px) scale(0.98);
+      }
+
+      /* ---------- Hero ---------- */
+      .hero {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        padding: var(--m);
+        min-height: 100svh;
+      }
+      .card {
+        background: var(--stencil);
+        color: var(--port);
+        display: flex;
+        flex-direction: column;
+        border-radius: var(--r);
+        overflow: hidden;
+      }
+      .band {
+        display: flex;
+        height: 56px;
+        flex: none;
+      }
+      .band i {
+        width: 28px;
+        flex: none;
+      }
+      .band i:nth-child(8n + 1) {
+        background: var(--rust);
+      }
+      .band i:nth-child(8n + 3) {
+        background: var(--harbour);
+      }
+      .band i:nth-child(8n + 5) {
+        background: var(--evergreen);
+      }
+      .band i:nth-child(8n + 7) {
+        background: var(--ochre);
+      }
+      .card-body {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 48px clamp(24px, 4vw, 64px);
+      }
+      .wordmark {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        font-family: var(--display);
+        font-size: var(--step-lead);
+        letter-spacing: -0.03em;
+        margin-bottom: 40px;
+      }
+      .wordmark img {
+        width: 44px;
+        height: 44px;
+      }
+      .hero h1 {
+        font-size: var(--step-hero);
+        text-transform: uppercase;
+        max-width: 12ch;
+      }
+      .hero .lede {
+        margin-top: 36px;
+        max-width: 38ch;
+      }
+      .hero .btn {
+        margin-top: 32px;
+      }
+      .card-links {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px 28px;
+        padding: 0 24px 28px;
+        font-size: 0.9375rem;
+      }
+      .card-links a {
+        text-decoration: none;
+        padding: 4px 0;
+      }
+      .card-links a:hover {
+        color: var(--rust);
+        text-decoration: underline;
+      }
+      .stage {
+        position: relative;
+        border-radius: var(--r);
+        overflow: hidden;
+        background: var(--harbour);
+        min-height: 560px;
+      }
+      .stage .shot {
+        position: absolute;
+        left: 32px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 150%;
+        max-width: none;
+        height: auto;
+      }
+
+      /* ---------- App fragments (the product's own conventions) ---------- */
+      [data-ui] {
+        font-family: var(--display);
+        font-weight: 500;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--stencil);
+        text-align: left;
+      }
+      .tab {
+        --line: var(--graphite);
+        flex: 1 1 0;
+        min-width: 0;
+        max-width: 240px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        padding: 0 9px;
+        border-radius: var(--r);
+        border: 1px solid var(--stencil);
+        background: var(--line);
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        transition: background-color 150ms;
+      }
+      .tab span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tab.ochre {
+        color: var(--port);
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+        flex: none;
+      }
+      .rust {
+        --line: var(--rust);
+      }
+      .ochre {
+        --line: var(--ochre);
+      }
+      .evergreen {
+        --line: var(--evergreen);
+      }
+      .graphite {
+        --line: var(--graphite);
+      }
+
+      /* ---------- MCP ---------- */
+      .agent {
+        background: var(--ochre);
+        color: var(--port);
+        padding: clamp(64px, 8vw, 120px) var(--m);
+        margin-top: 120px;
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 48px 24px;
+        align-items: center;
+      }
+      .agent-copy {
+        grid-column: 1 / 7;
+      }
+      .agent h2 {
+        font-size: var(--step-head);
+      }
+      .agent-lede {
+        margin-top: 28px;
+        font-size: var(--step-lead);
+        line-height: 1.35;
+        max-width: 34ch;
+      }
+      .agent-facts {
+        margin: 28px 0 0;
+        padding-left: 1.1em;
+        max-width: 56ch;
+      }
+      .agent-facts li + li {
+        margin-top: 8px;
+      }
+      .agent-shot {
+        grid-column: 1 / 13;
+        margin: 24px 0 0;
+      }
+      .agent-shot img {
+        width: 100%;
+        height: auto;
+      }
+      .agent-shot figcaption {
+        margin-top: 16px;
+        font-size: 1.0625rem;
+      }
+      .access {
+        grid-column: 8 / 13;
+        background: var(--rail);
+        border: 1px solid rgb(201 149 46 / 0.6);
+        border-radius: var(--r);
+        overflow: hidden;
+        font-size: 14px;
+      }
+      .access header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 18px 24px;
+        border-bottom: 1px solid rgb(255 255 255 / 0.1);
+      }
+      .access header .tab {
+        flex: none;
+      }
+      .access h3 {
+        font-size: 18px;
+        letter-spacing: -0.02em;
+        line-height: 1.25;
+      }
+      .tools {
+        list-style: none;
+        margin: 0;
+        padding: 12px 24px;
+        display: grid;
+        gap: 4px;
+      }
+      .tools label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 40px;
+        cursor: pointer;
+      }
+      .tools small {
+        display: block;
+        color: var(--stencil-mute);
+        font-size: 12px;
+      }
+      .tools input {
+        appearance: none;
+        flex: none;
+        width: 36px;
+        height: 20px;
+        border-radius: 10px;
+        border: 1px solid rgb(255 255 255 / 0.2);
+        background: var(--rail);
+        position: relative;
+        cursor: pointer;
+        margin: 0;
+        transition: background-color 150ms;
+      }
+      .tools input::after {
+        content: "";
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--stencil-mute);
+        transition: transform 150ms var(--ease);
+      }
+      .tools input:checked {
+        background: var(--stencil);
+        border-color: var(--stencil);
+      }
+      .tools input:checked::after {
+        background: var(--port);
+        transform: translateX(16px);
+      }
+      .access-out {
+        margin: 0;
+        padding: 14px 24px;
+        background: var(--port);
+        border-top: 1px solid rgb(255 255 255 / 0.1);
+        color: var(--stencil-dim);
+        font: 500 13px/1.6 var(--code);
+        white-space: pre-wrap;
+      }
+
+      /* ---------- Showcase ---------- */
+      section {
+        scroll-margin-top: 24px;
+      }
+      .showcase {
+        margin-top: var(--gap);
+        padding: 0 var(--m);
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 0 24px;
+        align-items: end;
+      }
+      .picker {
+        grid-column: 1 / 5;
+        grid-row: 1;
+        font-family: var(--display);
+        font-size: clamp(28px, 2.9vw, 44px);
+        letter-spacing: -0.035em;
+        line-height: 1.15;
+      }
+      .picker h2 {
+        font-size: inherit;
+        line-height: inherit;
+        color: var(--muted);
+        margin-bottom: 0.3em;
+      }
+      .picker button {
+        all: unset;
+        cursor: pointer;
+        color: var(--muted);
+        display: inline-block;
+        transition:
+          color 200ms,
+          transform 200ms var(--ease);
+      }
+      .picker button:hover {
+        color: var(--stencil-dim);
+        transform: translateX(6px);
+      }
+      .picker button[aria-selected="true"] {
+        color: var(--ink);
+      }
+      .picker button:focus-visible {
+        outline: 2px solid var(--stencil);
+        outline-offset: 2px;
+      }
+      .door {
+        grid-column: 5 / 11;
+        grid-row: 1;
+        position: relative;
+        height: 72vh;
+        min-height: 520px;
+        display: grid;
+        place-items: center;
+      }
+      .door .shape {
+        position: absolute;
+        inset: 6% 12% 0;
+        background: var(--door, var(--rust));
+        transition: background-color 300ms ease;
+      }
+      .panel {
+        position: relative;
+        width: 100%;
+        margin-top: -8%;
+        display: none;
+      }
+      .panel.on {
+        display: block;
+        animation: fadein 300ms ease;
+      }
+      .panel img {
+        width: 100%;
+        height: auto;
+        border: 1px solid rgb(255 255 255 / 0.1);
+      }
+      @keyframes fadein {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+      }
+      .fact {
+        grid-column: 11 / 13;
+        grid-row: 1;
+        font-size: 1.0625rem;
+        padding-bottom: 8px;
+      }
+
+      /* ---------- Principles: sentences with switches ---------- */
+      .light {
+        margin-top: var(--gap);
+      }
+      .light > h2 {
+        padding: 0 var(--m) 48px;
+        font-size: var(--step-head);
+      }
+      .sw-band {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 24px;
+        min-height: 20vh;
+        padding: 28px var(--m);
+        background: var(--ground);
+        transition: background-color 280ms ease;
+      }
+      .sw-band:nth-of-type(even) {
+        background: var(--rail);
+      }
+      .sw-band h3 {
+        font-size: clamp(28px, 3.4vw, 56px);
+        color: var(--muted);
+        transition: color 280ms ease;
+      }
+      .sw-band p {
+        margin-top: 14px;
+        font-size: 1.0625rem;
+        max-width: 60ch;
+        display: none;
+      }
+      .sw-band.on {
+        background: var(--c);
+      }
+      .sw-band.on h3 {
+        color: var(--stencil);
+      }
+      .sw-band.on p {
+        display: block;
+        animation: fadein 280ms ease;
+      }
+      .sw-band.on.dark-ink,
+      .sw-band.on.dark-ink h3 {
+        color: var(--port);
+      }
+      .toggle {
+        font-size: clamp(28px, 3.4vw, 56px);
+        width: 2em;
+        height: 1.1em;
+        border-radius: 1em;
+        border: 2px solid var(--stencil-mute);
+        background: var(--rail);
+        position: relative;
+        cursor: pointer;
+        padding: 0;
+        transition:
+          background-color 200ms,
+          border-color 200ms;
+      }
+      .toggle::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 0.12em;
+        width: 0.8em;
+        height: 0.8em;
+        border-radius: 50%;
+        background: var(--stencil-mute);
+        transform: translateY(-50%);
+        transition: transform 220ms var(--ease);
+      }
+      .toggle[aria-checked="true"] {
+        background: var(--stencil);
+        border-color: var(--stencil);
+      }
+      .toggle[aria-checked="true"]::after {
+        background: var(--port);
+        transform: translate(0.92em, -50%);
+      }
+
+      /* ---------- FAQ ---------- */
+      .faq {
+        margin-top: var(--gap);
+        padding: 0 var(--m);
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 0 24px;
+      }
+      .faq > * {
+        grid-column: 3 / 11;
+      }
+      .faq h2 {
+        font-size: var(--step-head);
+        margin-bottom: 48px;
+      }
+      .drawer details {
+        --tx: calc(var(--i) * 120px);
+        position: relative;
+        margin-top: -40px;
+        padding-top: 40px;
+        background: var(--c);
+        color: var(--t, var(--stencil));
+        clip-path: polygon(
+          var(--tx) 0,
+          calc(var(--tx) + 200px) 0,
+          calc(var(--tx) + 200px) 40px,
+          100% 40px,
+          100% 100%,
+          0 100%,
+          0 40px,
+          var(--tx) 40px
+        );
+      }
+      .drawer details:first-child {
+        margin-top: 0;
+      }
+      .drawer summary {
+        list-style: none;
+        cursor: pointer;
+        padding: 18px 28px 58px;
+        position: relative;
+      }
+      .drawer summary::-webkit-details-marker {
+        display: none;
+      }
+      .drawer summary .topic {
+        position: absolute;
+        top: -40px;
+        left: var(--tx);
+        width: 200px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        padding: 0 16px;
+        font-size: 1rem;
+        font-weight: 600;
+      }
+      .drawer summary h3 {
+        font-family: var(--text);
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        line-height: 1.25;
+        font-size: 1.25rem;
+        transition: transform 180ms var(--ease);
+      }
+      .drawer summary:hover h3 {
+        transform: translateX(4px);
+      }
+      .drawer details[open] summary {
+        padding-bottom: 12px;
+      }
+      .drawer .a {
+        padding: 0 28px 72px;
+        max-width: calc(56ch + 56px);
+        font-size: 1.0625rem;
+      }
+
+      /* ---------- CTA: the connection form, already open ---------- */
+      .start {
+        margin-top: 120px;
+        background: var(--harbour);
+        padding: 120px var(--m);
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 24px;
+        align-items: center;
+      }
+      .start .close {
+        grid-column: 1 / 6;
+      }
+      .start h2 {
+        font-size: clamp(56px, 7vw, 112px);
+        line-height: 0.92;
+      }
+      .start .close p {
+        margin-top: 28px;
+        max-width: 40ch;
+        font-size: 1.0625rem;
+      }
+      .dialog {
+        grid-column: 7 / 12;
+        width: min(440px, 100%);
+        justify-self: center;
+        background: var(--rail);
+        border: 1px solid rgb(255 255 255 / 0.1);
+        border-radius: var(--r);
+        padding: 24px;
+        display: grid;
+        gap: 16px;
+      }
+      .dialog h3 {
+        font-size: 20px;
+        letter-spacing: -0.025em;
+        line-height: 1.2;
+      }
+      .dialog label,
+      .dialog legend {
+        display: grid;
+        gap: 6px;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--stencil-dim);
+      }
+      .dialog legend {
+        padding: 0;
+        margin-bottom: 6px;
+      }
+      .dialog fieldset {
+        border: 0;
+        margin: 0;
+        padding: 0;
+      }
+      .dialog input {
+        height: 44px;
+        background: var(--port);
+        color: var(--stencil);
+        border: 1px solid rgb(255 255 255 / 0.1);
+        border-radius: var(--r);
+        padding: 0 12px;
+        font: 500 15px var(--display);
+        letter-spacing: 0;
+        text-transform: none;
+      }
+      .dialog input:focus {
+        outline: none;
+        border-color: var(--stencil);
+      }
+      .seg {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        border: 1px solid rgb(255 255 255 / 0.1);
+        border-radius: var(--r);
+        padding: 3px;
+        gap: 3px;
+      }
+      .seg button {
+        height: 34px;
+        border: 0;
+        border-radius: var(--r);
+        background: transparent;
+        color: var(--stencil-mute);
+        font: 500 12px var(--display);
+        letter-spacing: 0.1em;
+        cursor: pointer;
+        transition: background-color 150ms;
+      }
+      .seg button:hover {
+        background: rgb(255 255 255 / 0.05);
+      }
+      .seg button[aria-pressed="true"] {
+        background: var(--stencil);
+        color: var(--port);
+      }
+      .preview {
+        display: flex;
+        padding: 10px;
+        background: var(--rib);
+        border-radius: var(--r);
+      }
+      .preview .tab {
+        max-width: none;
+      }
+      .dialog .go {
+        height: 52px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--r);
+        background: var(--stencil);
+        color: var(--port);
+        text-decoration: none;
+        font-size: 14px;
+        transition: background-color 150ms;
+      }
+      .dialog .go:hover {
+        background: #fff;
+      }
+
+      /* ---------- Footer ---------- */
+      footer {
+        padding: 0 var(--m) 32px;
+        background: var(--rail);
+      }
+      .stack {
+        display: flex;
+        align-items: flex-end;
+        gap: 4px;
+        height: 34svh;
+        min-height: 220px;
+        padding-top: 64px;
+      }
+      .stack span {
+        flex: 1;
+        height: var(--h);
+        background: var(--c);
+        color: var(--rail);
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        font-family: var(--display);
+        font-weight: 700;
+        font-size: clamp(40px, 9vw, 150px);
+        line-height: 0.8;
+        letter-spacing: -0.04em;
+        padding-bottom: 0.08em;
+        overflow: hidden;
+      }
+      .foot {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 32px 24px;
+        margin-top: 56px;
+        font-size: 0.9375rem;
+      }
+      .foot nav {
+        grid-column: span 2;
+      }
+      .foot nav h2 {
+        font-family: var(--text);
+        font-size: 0.9375rem;
+        font-weight: 600;
+        letter-spacing: 0;
+        line-height: 1.5;
+        margin-bottom: 8px;
+      }
+      .foot ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .foot li {
+        padding: 2px 0;
+      }
+      .foot a {
+        text-decoration: none;
+      }
+      .foot a:hover {
+        text-decoration: underline;
+      }
+      .foot .about {
+        grid-column: 9 / 13;
+      }
+      .last {
+        grid-column: 1 / 13;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+      }
+      .last .btn {
+        background: var(--stencil);
+        color: var(--port);
+        min-height: 44px;
+      }
+      .last .btn:hover {
+        background: #fff;
+      }
+
+      /* ---------- Entrances ---------- */
+      .js [data-rise] > * {
+        opacity: 0;
+        transform: translateY(24px);
+        transition:
+          opacity 600ms var(--ease),
+          transform 600ms var(--ease);
+      }
+      .js [data-rise].seen > * {
+        opacity: 1;
+        transform: none;
+      }
+      .js [data-rise].seen > *:nth-child(2) {
+        transition-delay: 80ms;
+      }
+      .js [data-rise].seen > *:nth-child(n + 3) {
+        transition-delay: 160ms;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition-duration: 1ms !important;
+          transition-delay: 0ms !important;
+        }
+        html {
+          scroll-behavior: auto;
+        }
+        .js [data-rise] > * {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      /* ---------- Phone ---------- */
+      @media (max-width: 900px) {
+        .hero {
+          grid-template-columns: 1fr;
+          min-height: 0;
+        }
+        .stage {
+          order: -1;
+          min-height: 0;
+          height: 38svh;
+        }
+        .stage .shot {
+          left: 16px;
+          width: 170%;
+        }
+        .card {
+          margin-top: -24px;
+          position: relative;
+        }
+        .band {
+          height: 40px;
+        }
+        .card-body {
+          padding: 28px 20px 32px;
+        }
+        .wordmark {
+          margin-bottom: 20px;
+        }
+        .hero .lede {
+          margin-top: 20px;
+        }
+        .hero .btn {
+          margin-top: 24px;
+        }
+        .hero h1 {
+          font-size: clamp(2rem, 9vw, 3rem);
+        }
+        .agent-copy,
+        .access {
+          grid-column: 1 / 13;
+        }
+        .showcase {
+          display: flex;
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .door {
+          order: -1;
+          height: auto;
+          min-height: 0;
+          padding: 40px 0 0;
+        }
+        .door .shape {
+          inset: 0 6%;
+        }
+        .panel {
+          margin-top: 0;
+        }
+        .picker {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 2px 20px;
+          font-size: 26px;
+          padding: 32px 0 8px;
+        }
+        .picker h2 {
+          flex-basis: 100%;
+        }
+        .fact {
+          font-size: 1rem;
+        }
+        .sw-band {
+          min-height: 132px;
+        }
+        .sw-band h3 {
+          font-size: 6.4vw;
+        }
+        .toggle {
+          font-size: 32px;
+        }
+        .faq > * {
+          grid-column: 1 / 13;
+        }
+        .faq h2 {
+          font-size: 9vw;
+        }
+        .drawer details {
+          --tx: calc(var(--i) * 30px);
+          clip-path: polygon(
+            var(--tx) 0,
+            calc(var(--tx) + 140px) 0,
+            calc(var(--tx) + 140px) 40px,
+            100% 40px,
+            100% 100%,
+            0 100%,
+            0 40px,
+            var(--tx) 40px
+          );
+        }
+        .drawer summary {
+          padding: 16px 20px 52px;
+        }
+        .drawer summary .topic {
+          width: 140px;
+        }
+        .drawer .a {
+          padding: 0 20px 64px;
+          font-size: 1rem;
+        }
+        .start {
+          display: flex;
+          flex-direction: column;
+          align-items: stretch;
+          padding: 56px var(--m) 40px;
+        }
+        .start h2 {
+          font-size: 13vw;
+        }
+        .dialog {
+          width: 100%;
+        }
+        .stack {
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
+          height: auto;
+          min-height: 0;
+        }
+        .stack span {
+          height: 22vw;
+          font-size: 14vw;
+        }
+        .foot nav {
+          grid-column: span 6;
+        }
+        .foot .about {
+          grid-column: 1 / 13;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <main id="main">
+      <!-- Hero -->
+      <section class="hero" aria-labelledby="title">
+        <div class="card">
+          <div class="band" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </div>
+          <div class="card-body">
+            <div class="wordmark">
+              <img src="favicon.png" alt="" width="44" height="44" />
+              Noverdbee
+            </div>
+            <h1 id="title">Databases for you and your AI</h1>
+            <p class="lede">
+              An open-source PostgreSQL and SQLite client with a built-in MCP server, so you and your agent work the
+              same databases from one app, and every tab tells you which environment it is about to hit.
+            </p>
+            <a class="btn" href="https://github.com/noverwork/noverdbee/releases">Download for macOS, Windows or Linux</a>
+          </div>
+          <nav class="card-links" aria-label="Page">
+            <a href="#mcp">MCP</a>
+            <a href="#window">Features</a>
+            <a href="#rules">Ground rules</a>
+            <a href="#faq">Questions</a>
+            <a href="https://github.com/noverwork/noverdbee">Source on GitHub</a>
+          </nav>
+        </div>
+
+        <div class="stage">
+          <img
+            class="shot"
+            src="assets/shots/editor-results.webp"
+            width="1600"
+            height="1067"
+            alt="Noverdbee with a PRD·SHOP query tab: a SQL join of orders and customers in the editor and three result rows in the grid below, with the connection navigator on the left"
+          />
+        </div>
+      </section>
+
+      <!-- MCP -->
+      <section class="agent" id="mcp" aria-labelledby="mcp-h">
+        <div class="agent-copy" data-rise>
+          <h2 id="mcp-h">Let an AI agent read your data</h2>
+          <p class="agent-lede">
+            Turn on MCP and Claude Code, Cursor, VS Code or Claude Desktop can list your tables, read their columns and
+            run queries against the connections you share, with the tools you tick on each one.
+          </p>
+          <ul class="agent-facts">
+            <li>Listens on 127.0.0.1 only, and every request needs the token kept in Noverdbee's local database.</li>
+            <li>A connection stays out of MCP until you allow a tool on it. Select, insert, update and delete are separate switches.</li>
+            <li>The agent sees a connection's name, driver and environment, never its host or password.</li>
+            <li><code>select</code> runs on its own read-only session: SQLite opens the file read-only, PostgreSQL runs a read-only transaction.</li>
+          </ul>
+        </div>
+
+        <div class="access" data-ui role="group" aria-labelledby="ac-h">
+          <header>
+            <div class="tab rust"><span>PRD·SHOP</span><i class="dot"></i></div>
+            <h3 id="ac-h">Tools AI clients may use</h3>
+          </header>
+          <ul class="tools">
+            <li><label><span>select<small>one read-only query</small></span><input type="checkbox" data-tool="select" checked /></label></li>
+            <li><label><span>insert<small>add rows to a table</small></span><input type="checkbox" data-tool="insert" /></label></li>
+            <li><label><span>update<small>change rows matching a condition</small></span><input type="checkbox" data-tool="update" /></label></li>
+            <li><label><span>delete<small>remove rows matching a condition</small></span><input type="checkbox" data-tool="delete" /></label></li>
+          </ul>
+          <pre class="access-out" id="ac-out" aria-live="polite"></pre>
+        </div>
+
+        <figure class="agent-shot">
+          <img
+            src="assets/shots/mcp.webp"
+            width="1600"
+            height="1067"
+            alt="Noverdbee MCP page: port, URL and hidden token with copy and regenerate buttons, a ready-made claude mcp add command with tabs for Claude Code, Cursor, VS Code and Claude Desktop, and the tool list: list_connections, list_tables, describe_table, select, insert, update and delete"
+            loading="lazy"
+          />
+          <figcaption>Copy the command for your client. The token stays hidden until you reveal it.</figcaption>
+        </figure>
+      </section>
+
+      <!-- Showcase -->
+      <section class="showcase" id="window" aria-labelledby="window-h">
+        <div class="picker" role="tablist" aria-labelledby="window-h">
+          <h2 id="window-h">One window for</h2>
+          <div><button role="tab" aria-selected="true" aria-controls="p-sql" id="t-sql" data-door="var(--rust)">SQL</button></div>
+          <div><button role="tab" aria-selected="false" aria-controls="p-edit" id="t-edit" data-door="var(--ochre)" tabindex="-1">Row edits</button></div>
+          <div><button role="tab" aria-selected="false" aria-controls="p-struct" id="t-struct" data-door="var(--harbour)" tabindex="-1">Structure</button></div>
+          <div><button role="tab" aria-selected="false" aria-controls="p-nav" id="t-nav" data-door="var(--evergreen)" tabindex="-1">Environments</button></div>
+          <div><button role="tab" aria-selected="false" aria-controls="p-conn" id="t-conn" data-door="var(--graphite)" tabindex="-1">Connections</button></div>
+        </div>
+
+        <div class="door">
+          <div class="shape" aria-hidden="true"></div>
+
+          <div class="panel on" id="p-sql" role="tabpanel" aria-labelledby="t-sql" data-fact="Cmd+Enter runs the selection, or the whole script when nothing is selected. Each statement reports its rows and time; an error points at where it happened.">
+            <img src="assets/shots/editor-error.webp" width="1600" height="1067" alt="SQL editor with an UPDATE that affected 2 rows and a SELECT that failed with a syntax error, both reported in the messages pane" loading="lazy" />
+          </div>
+
+          <div class="panel" id="p-edit" role="tabpanel" aria-labelledby="t-edit" hidden data-fact="Edit cells, add rows, mark rows for deletion. Nothing is written until you press Save, and Review SQL shows the statements first.">
+            <img src="assets/shots/table-pending.webp" width="1600" height="1067" alt="customers table with two edited cells outlined in ochre, a row struck through for deletion, a new row, and a bar reading 4 pending changes with Review SQL, Discard and Save" loading="lazy" />
+          </div>
+
+          <div class="panel" id="p-struct" role="tabpanel" aria-labelledby="t-struct" hidden data-fact="Columns, indexes, foreign keys and the table's definition, one tab over from its data.">
+            <img src="assets/shots/table-structure.webp" width="1600" height="1067" alt="Structure tab of the customers table listing its columns with type, not null, default and primary key" loading="lazy" />
+          </div>
+
+          <div class="panel" id="p-nav" role="tabpanel" aria-labelledby="t-nav" hidden data-fact="Every connection names its environment: production rust, staging ochre, development green, local grey. The colour follows it into every tab and the status line.">
+            <img src="assets/shots/navigator.webp" width="1600" height="1067" alt="Navigator with connections in Analytics and Shop folders, each marked by its environment colour; shop is open with its tables and views, staging shows a red failed dot" loading="lazy" />
+          </div>
+
+          <div class="panel" id="p-conn" role="tabpanel" aria-labelledby="t-conn" hidden data-fact="SQLite files and PostgreSQL servers, filed in folders you name. Test the connection before you save it.">
+            <img src="assets/shots/connection-postgres.webp" width="1600" height="1067" alt="Edit connection form for a PostgreSQL connection named warehouse in the Development environment and the Analytics group, with host db.internal and port 5432" loading="lazy" />
+          </div>
+        </div>
+
+        <p class="fact" id="fact" aria-live="polite">
+          Cmd+Enter runs the selection, or the whole script when nothing is selected. Each statement reports its rows and
+          time; an error points at where it happened.
+        </p>
+      </section>
+
+      <!-- Ground rules -->
+      <section class="light" id="rules" aria-labelledby="light-h">
+        <h2 id="light-h">Ground rules</h2>
+        <div class="sw-band on" style="--c: var(--rust)">
+          <div>
+            <h3 id="s1">Production reads before the query</h3>
+            <p>Each tab carries its environment's colour and a stencilled code like <code>PRD·SHOP</code>, so a statement meant for staging does not run against production.</p>
+          </div>
+          <button class="toggle" role="switch" aria-checked="true" aria-labelledby="s1"></button>
+        </div>
+        <div class="sw-band on dark-ink" style="--c: var(--ochre)">
+          <div>
+            <h3 id="s2">Nothing changes silently</h3>
+            <p>Row edits stay ochre and deletions stay struck through until you save or discard them.</p>
+          </div>
+          <button class="toggle" role="switch" aria-checked="true" aria-labelledby="s2"></button>
+        </div>
+        <div class="sw-band" style="--c: var(--harbour)">
+          <div>
+            <h3 id="s3">Every connection stays on this machine</h3>
+            <p>Connections, folders and settings live in one local SQLite file. No account, no cloud sync, no telemetry.</p>
+          </div>
+          <button class="toggle" role="switch" aria-checked="false" aria-labelledby="s3"></button>
+        </div>
+        <div class="sw-band" style="--c: var(--evergreen)">
+          <div>
+            <h3 id="s4">Native, not a web page</h3>
+            <p>Drawn with GPUI and written in Rust. No Electron, no webview, no JVM.</p>
+          </div>
+          <button class="toggle" role="switch" aria-checked="false" aria-labelledby="s4"></button>
+        </div>
+      </section>
+
+      <!-- FAQ -->
+      <section class="faq" id="faq" aria-labelledby="faq-h">
+        <h2 id="faq-h">Fair questions</h2>
+        <div class="drawer">
+          <details name="faq" open style="--i: 0; --c: var(--stencil); --t: var(--port)">
+            <summary><span class="topic">Price</span><h3>Is Noverdbee free?</h3></summary>
+            <div class="a"><p>Yes. It is open source under the MIT License. Download a build from GitHub Releases or build it yourself; pull requests are welcome.</p></div>
+          </details>
+          <details name="faq" style="--i: 1; --c: var(--graphite)">
+            <summary><span class="topic">Databases</span><h3>Which databases does it support?</h3></summary>
+            <div class="a"><p>PostgreSQL and SQLite. Tables are grouped by schema in PostgreSQL, and schemas you do not need can be hidden.</p></div>
+          </details>
+          <details name="faq" style="--i: 2; --c: var(--stencil); --t: var(--port)">
+            <summary><span class="topic">Platforms</span><h3>Which systems does it run on?</h3></summary>
+            <div class="a"><p>macOS on Apple Silicon (a <code>.dmg</code>, or a one-line install script), Windows (an <code>.exe</code> installer) and Linux on x86-64 (an <code>.AppImage</code> or a <code>.deb</code>).</p></div>
+          </details>
+          <details name="faq" style="--i: 3; --c: var(--graphite)">
+            <summary><span class="topic">Privacy</span><h3>Where do my connections live?</h3></summary>
+            <div class="a"><p>In a local SQLite database in the app data folder, passwords included, in plain text for now. There is no account, no telemetry and no cloud sync. Besides your database connections, the only network request is the update check against GitHub Releases.</p></div>
+          </details>
+          <details name="faq" style="--i: 4; --c: var(--stencil); --t: var(--port)">
+            <summary><span class="topic">AI</span><h3>What can my AI agent do with it?</h3></summary>
+            <div class="a"><p>Through the MCP server it can list tables, describe them, and run select, insert, update or delete on the connections where you allowed that tool. Connections with no tool allowed stay invisible to it.</p></div>
+          </details>
+          <details name="faq" style="--i: 5; --c: var(--graphite)">
+            <summary><span class="topic">Updates</span><h3>How do I get new versions?</h3></summary>
+            <div class="a"><p>Install once. Noverdbee checks GitHub Releases on its own and updates itself. The interface speaks English and Traditional Chinese.</p></div>
+          </details>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <section class="start" aria-labelledby="start-h">
+        <div class="close" data-rise>
+          <h2 id="start-h">Open your first connection</h2>
+          <p>Download the build for your system from GitHub Releases. Add a database, pick its environment, and it opens as a tab painted like the one in this form.</p>
+        </div>
+        <form class="dialog" data-ui onsubmit="return false" aria-labelledby="dlg-h">
+          <h3 id="dlg-h">New connection</h3>
+          <label>Name<input id="cname" value="shop" autocomplete="off" spellcheck="false" maxlength="20" /></label>
+          <fieldset>
+            <legend>Environment</legend>
+            <div class="seg">
+              <button type="button" aria-pressed="true" data-g="PRD" data-c="rust">Production</button>
+              <button type="button" aria-pressed="false" data-g="STG" data-c="ochre">Staging</button>
+              <button type="button" aria-pressed="false" data-g="DEV" data-c="evergreen">Development</button>
+              <button type="button" aria-pressed="false" data-g="LOC" data-c="graphite">Local</button>
+            </div>
+          </fieldset>
+          <div class="preview" aria-live="polite">
+            <div class="tab rust" id="ptab"><span id="pcode">PRD·SHOP</span><i class="dot"></i></div>
+          </div>
+          <a class="go" href="https://github.com/noverwork/noverdbee/releases">Download Noverdbee</a>
+        </form>
+      </section>
+    </main>
+
+    <footer>
+      <div class="stack" aria-hidden="true">
+        <span style="--h: 92%; --c: var(--rust)">N</span>
+        <span style="--h: 70%; --c: var(--stencil)">O</span>
+        <span style="--h: 100%; --c: var(--harbour)">V</span>
+        <span style="--h: 78%; --c: var(--ochre)">E</span>
+        <span style="--h: 62%; --c: var(--evergreen)">R</span>
+        <span style="--h: 96%; --c: var(--stencil)">D</span>
+        <span style="--h: 74%; --c: var(--rust)">B</span>
+        <span style="--h: 88%; --c: var(--harbour)">E</span>
+        <span style="--h: 66%; --c: var(--ochre)">E</span>
+      </div>
+      <div class="foot">
+        <nav aria-labelledby="f1">
+          <h2 id="f1">Get it</h2>
+          <ul>
+            <li><a href="https://github.com/noverwork/noverdbee/releases">Releases</a></li>
+            <li><a href="#faq">Questions</a></li>
+          </ul>
+        </nav>
+        <nav aria-labelledby="f2">
+          <h2 id="f2">Source</h2>
+          <ul>
+            <li><a href="https://github.com/noverwork/noverdbee">GitHub</a></li>
+            <li><a href="https://github.com/noverwork/noverdbee/issues">Report a bug</a></li>
+          </ul>
+        </nav>
+        <nav aria-labelledby="f3">
+          <h2 id="f3">Also by noverwork</h2>
+          <ul>
+            <li><a href="https://noverwork.github.io/noverterm/">Noverterm, SSH client</a></li>
+          </ul>
+        </nav>
+        <nav aria-labelledby="f4">
+          <h2 id="f4">Licence</h2>
+          <ul>
+            <li><a href="https://github.com/noverwork/noverdbee/blob/main/LICENSE">MIT</a></li>
+          </ul>
+        </nav>
+        <p class="about">Noverdbee is made by noverwork. Databases for you and your AI.</p>
+        <div class="last">
+          <span>© 2026 noverwork</span>
+          <a class="btn" href="https://github.com/noverwork/noverdbee/releases">Download</a>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      document.documentElement.classList.add("js");
+
+      // MCP access demo: what list_connections would report
+      const acOut = document.getElementById("ac-out");
+      const tools = [...document.querySelectorAll("[data-tool]")];
+      const report = () => {
+        const on = tools.filter((t) => t.checked).map((t) => t.dataset.tool);
+        acOut.textContent = on.length
+          ? "list_connections →\n" +
+            JSON.stringify({ name: "shop", environment: "production", tools: ["list_tables", "describe_table", ...on] })
+          : "list_connections →\nNo connection is shared with MCP.";
+      };
+      tools.forEach((t) => t.addEventListener("change", report));
+      report();
+
+      // Showcase tabs
+      const tabs = [...document.querySelectorAll('.picker [role="tab"]')];
+      const door = document.querySelector(".door .shape");
+      const fact = document.getElementById("fact");
+      const select = (t) => {
+        tabs.forEach((b) => {
+          const on = b === t;
+          b.setAttribute("aria-selected", on);
+          b.tabIndex = on ? 0 : -1;
+          const p = document.getElementById(b.getAttribute("aria-controls"));
+          p.hidden = !on;
+          p.classList.toggle("on", on);
+          if (on) fact.textContent = p.dataset.fact;
+        });
+        door.style.setProperty("--door", t.dataset.door);
+      };
+      tabs.forEach((b, i) => {
+        b.addEventListener("click", () => select(b));
+        b.addEventListener("keydown", (e) => {
+          const d = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
+          if (!d) return;
+          e.preventDefault();
+          const n = tabs[(i + d + tabs.length) % tabs.length];
+          n.focus();
+          select(n);
+        });
+      });
+
+      // Switch bands
+      document.querySelectorAll(".toggle").forEach((t) =>
+        t.addEventListener("click", () => {
+          const on = t.getAttribute("aria-checked") !== "true";
+          t.setAttribute("aria-checked", on);
+          t.closest(".sw-band").classList.toggle("on", on);
+        })
+      );
+
+      // New connection form: stencil the tab as you type
+      const cname = document.getElementById("cname");
+      const ptab = document.getElementById("ptab");
+      const pcode = document.getElementById("pcode");
+      let env = "PRD";
+      const paint = () => {
+        const n = cname.value.trim().replace(/\s+/g, "-").toUpperCase() || "CONN";
+        pcode.textContent = env + "·" + n;
+      };
+      cname.addEventListener("input", paint);
+      document.querySelectorAll(".seg button").forEach((b) =>
+        b.addEventListener("click", () => {
+          document.querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+          env = b.dataset.g;
+          ptab.className = "tab " + b.dataset.c;
+          paint();
+        })
+      );
+
+      // Entrances
+      const rise = document.querySelectorAll("[data-rise], .picker, .light, .drawer, .foot");
+      rise.forEach((el) => el.setAttribute("data-rise", ""));
+      if ("IntersectionObserver" in window) {
+        const io = new IntersectionObserver(
+          (es) =>
+            es.forEach((e) => {
+              if (e.isIntersecting) {
+                e.target.classList.add("seen");
+                io.unobserve(e.target);
+              }
+            }),
+          { threshold: 0.12 }
+        );
+        rise.forEach((el) => io.observe(el));
+      } else rise.forEach((el) => el.classList.add("seen"));
+    </script>
+  </body>
+</html>

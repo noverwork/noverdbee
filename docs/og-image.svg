@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#101317"/>
+  <g>
+    <rect x="0" y="0" width="1200" height="20" fill="#e8e4d8"/>
+    <rect x="0" y="0" width="40" height="20" fill="#a33b28"/>
+    <rect x="80" y="0" width="40" height="20" fill="#2a648f"/>
+    <rect x="160" y="0" width="40" height="20" fill="#336a41"/>
+    <rect x="240" y="0" width="40" height="20" fill="#c9952e"/>
+    <rect x="320" y="0" width="40" height="20" fill="#a33b28"/>
+    <rect x="400" y="0" width="40" height="20" fill="#2a648f"/>
+    <rect x="480" y="0" width="40" height="20" fill="#336a41"/>
+    <rect x="560" y="0" width="40" height="20" fill="#c9952e"/>
+  </g>
+  <image x="64" y="76" width="72" height="72" xlink:href="icon.png"/>
+  <text x="156" y="126" font-family="Helvetica Neue, Arial, sans-serif" font-weight="700" font-size="40" letter-spacing="-1" fill="#e8e4d8">Noverdbee</text>
+  <text font-family="Helvetica Neue, Arial, sans-serif" font-weight="700" font-size="60" letter-spacing="-2" fill="#e8e4d8">
+    <tspan x="64" y="262">DATABASES FOR</tspan>
+    <tspan x="64" y="326">YOU AND YOUR AI</tspan>
+  </text>
+  <text font-family="Georgia, serif" font-size="28" fill="#c1beb5">
+    <tspan x="64" y="410">An open-source PostgreSQL and</tspan>
+    <tspan x="64" y="446">SQLite client with an MCP server.</tspan><tspan x="64" y="482">macOS, Windows, Linux.</tspan>
+  </text>
+  <rect x="720" y="230" width="560" height="373" fill="#2a648f"/>
+  <image x="752" y="262" width="640" height="427" xlink:href="assets/shots/editor-results.webp"/>
+  <rect x="64" y="540" width="132" height="34" fill="#a33b28"/>
+  <text x="80" y="563" font-family="Helvetica Neue, Arial, sans-serif" font-weight="700" font-size="16" letter-spacing="2" fill="#e8e4d8">PRD·SHOP</text>
+  <rect x="208" y="540" width="132" height="34" fill="#c9952e"/>
+  <text x="224" y="563" font-family="Helvetica Neue, Arial, sans-serif" font-weight="700" font-size="16" letter-spacing="2" fill="#101317">STG·SHOP</text>
+  <rect x="352" y="540" width="132" height="34" fill="#336a41"/>
+  <text x="368" y="563" font-family="Helvetica Neue, Arial, sans-serif" font-weight="700" font-size="16" letter-spacing="2" fill="#e8e4d8">DEV·DWH</text>
+</svg>

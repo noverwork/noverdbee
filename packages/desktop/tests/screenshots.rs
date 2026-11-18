@@ -185,6 +185,19 @@ mod shots {
 
         let app = desktop_lib::bootstrap::backend().expect("backend starts");
         let shop = seed(&app, data.path());
+        // The language otherwise follows the system; the website wants `en`.
+        if let Ok(code) = std::env::var("NOVERDBEE_SCREENSHOT_LOCALE") {
+            let locale = shared::Setting {
+                key: ui::i18n::LOCALE_SETTING.to_string(),
+                value: code,
+            };
+            desktop_lib::app::runtime()
+                .block_on(desktop_lib::store::settings::set_setting(
+                    locale,
+                    app.state(),
+                ))
+                .expect("save locale");
+        }
         let mut stage = open_stage(&app, out, 1200., 800.);
 
         stage.shoot("databases");
@@ -217,6 +230,14 @@ mod shots {
             .ok();
         stage.settle(Duration::from_millis(500));
         stage.shoot("navigator");
+        // The failure toast has been seen; keep it off the pages that follow.
+        stage
+            .cx
+            .update_window(stage.window, |_, window, cx| {
+                use gpui_kit::component::WindowExt as _;
+                window.clear_notifications(cx)
+            })
+            .ok();
 
         // The open connection got an editor; run SQL in it, then SQL that fails.
         for (name, sql) in [
@@ -327,7 +348,17 @@ mod shots {
         stage.settle(Duration::from_millis(500));
         stage.shoot("settings");
 
-        desktop_lib::app::runtime().block_on(desktop_lib::mcp::start(app.clone()));
+        // A port of its own, so a running noverdbee does not hold it.
+        desktop_lib::app::runtime().block_on(async {
+            let port = shared::Setting {
+                key: "noverdbee.mcp.port".to_string(),
+                value: (desktop_lib::mcp::DEFAULT_PORT + 9).to_string(),
+            };
+            desktop_lib::store::settings::set_setting(port, app.state())
+                .await
+                .expect("save MCP port");
+            desktop_lib::mcp::start(app.clone()).await
+        });
         stage.store(|store, cx| store.navigate(Route::Mcp, cx));
         stage.settle(Duration::from_millis(500));
         stage.shoot("mcp");
