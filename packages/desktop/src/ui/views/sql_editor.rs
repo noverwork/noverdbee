@@ -8,7 +8,7 @@ use gpui_kit::component::highlighter::Diagnostic;
 use gpui_kit::component::input::{Editor, EditorState, InputEvent, RopeExt as _};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::resizable::{resizable_panel, v_resizable};
-use gpui_kit::component::{h_flex, v_flex, Sizable as _, WindowExt as _};
+use gpui_kit::component::{h_flex, v_flex, Disableable as _, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -68,34 +68,37 @@ impl SqlEditor {
                 .language("sql")
                 .placeholder(t("Write SQL. Cmd+Enter runs the selection, or everything."))
         });
-        let _subscriptions = vec![cx.subscribe_in(
-            &editor,
-            window,
-            |this, editor, event: &InputEvent, window, cx| match event {
-                InputEvent::PressEnter {
-                    secondary: true, ..
-                } => this.run(window, cx),
-                InputEvent::Change => {
-                    // The error marker points into text that has now moved.
-                    editor.update(cx, |editor, cx| {
-                        if let Some(diagnostics) = editor.diagnostics_mut() {
-                            if !diagnostics.is_empty() {
-                                diagnostics.clear();
-                                cx.notify();
+        let store = store(cx);
+        let _subscriptions = vec![
+            cx.observe(&store, |_, _, cx| cx.notify()),
+            cx.subscribe_in(
+                &editor,
+                window,
+                |this, editor, event: &InputEvent, window, cx| match event {
+                    InputEvent::PressEnter {
+                        secondary: true, ..
+                    } => this.run(window, cx),
+                    InputEvent::Change => {
+                        // The error marker points into text that has now moved.
+                        editor.update(cx, |editor, cx| {
+                            if let Some(diagnostics) = editor.diagnostics_mut() {
+                                if !diagnostics.is_empty() {
+                                    diagnostics.clear();
+                                    cx.notify();
+                                }
                             }
-                        }
-                    });
-                    this.schedule_check(cx);
-                }
-                _ => {}
-            },
-        )];
+                        });
+                        this.schedule_check(cx);
+                    }
+                    _ => {}
+                },
+            ),
+        ];
         let completion = Rc::new(SqlCompletion::default());
         editor.update(cx, |editor, _| {
             editor.lsp_mut().completion_provider = Some(completion.clone());
         });
         // Completion offers nothing but keywords until the tables load.
-        let store = store(cx);
         if let Some(record) = store.read(cx).connection(&connection).cloned() {
             let app = store.read(cx).app();
             cx.spawn(async move |_, _| {
@@ -160,6 +163,24 @@ impl SqlEditor {
         if sql.trim().is_empty() {
             return;
         }
+        let app = self.store.read(cx).app();
+        let (connection, saved) = (self.connection.clone(), sql.clone());
+        crate::app::runtime().spawn(async move {
+            if let Err(error) =
+                crate::store::history::history_add(connection, saved, app.state()).await
+            {
+                tracing::warn!(error, "Failed to save query history");
+            }
+        });
+        self.execute(sql, base, window, cx);
+    }
+
+    /// Runs `sql` and shows what came back. `base` is where it starts in the
+    /// editor, for placing the error marker.
+    fn execute(&mut self, sql: String, base: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.running {
+            return;
+        }
         let Some(record) = self.store.read(cx).connection(&self.connection).cloned() else {
             return;
         };
@@ -171,18 +192,14 @@ impl SqlEditor {
                 let sessions = app.state::<SessionManager>();
                 let dropped = sessions.get(&record.id).is_some_and(|open| open.is_closed());
                 let session = sessions.connect(&record).await?;
-                let saved =
-                    crate::store::history::history_add(record.id, sql.clone(), app.state()).await;
-                if let Err(error) = saved {
-                    tracing::warn!(error, "Failed to save query history");
-                }
-                Ok::<_, String>((dropped, session.run(sql).await))
+                let results = session.run(sql).await;
+                Ok::<_, String>((dropped, results, session.in_transaction().await))
             })
             .await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.running = false;
                 match ran {
-                    Ok((dropped, results)) => {
+                    Ok((dropped, results, open)) => {
                         this.show(results, base, window, cx);
                         if dropped {
                             this.messages.insert(
@@ -194,6 +211,10 @@ impl SqlEditor {
                                 },
                             );
                         }
+                        let connection = this.connection.clone();
+                        this.store.update(cx, |store, cx| {
+                            store.set_transaction(&connection, open, cx)
+                        });
                     }
                     Err(error) => {
                         this.results.clear();
@@ -366,6 +387,7 @@ impl SqlEditor {
             .border_color(theme::RIB)
             .bg(theme::RAIL)
             .child(action)
+            .child(self.render_transaction(cx))
             .child(div().flex_1())
             .child(
                 Button::new("history")
@@ -375,6 +397,35 @@ impl SqlEditor {
                     .label(t("History"))
                     .on_click(cx.listener(|this, _, window, cx| this.open_history(window, cx))),
             )
+    }
+
+    /// Begin, or the open transaction with Commit and Rollback. A transaction
+    /// belongs to the connection, so every tab on it shows the same one.
+    fn render_transaction(&self, cx: &Context<Self>) -> impl IntoElement {
+        let statement = |id: &'static str, label: SharedString, sql: &'static str| {
+            Button::new(id)
+                .ghost()
+                .small()
+                .label(label)
+                .disabled(self.running)
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.execute(sql.to_string(), 0, window, cx)
+                }))
+        };
+        if !self.store.read(cx).in_transaction(&self.connection) {
+            return h_flex().child(statement("begin", t("Begin"), "BEGIN"));
+        }
+        h_flex()
+            .gap_1()
+            .child(
+                div()
+                    .px_2()
+                    .text_size(px(11.))
+                    .text_color(theme::AMBER_TEXT)
+                    .child(t("TRANSACTION OPEN")),
+            )
+            .child(statement("commit", t("Commit"), "COMMIT"))
+            .child(statement("rollback", t("Rollback"), "ROLLBACK"))
     }
 
     fn render_result_tabs(&self, cx: &Context<Self>) -> impl IntoElement {

@@ -250,6 +250,7 @@ impl Workspace {
                 (view.is_busy(), view.pending(cx) > 0)
             }
         };
+        let transaction = self.store.read(cx).in_transaction(&tab.connection);
         let state = if running {
             Some(ConnectionState::Connecting)
         } else {
@@ -305,6 +306,18 @@ impl Workspace {
                     .text_xs()
                     .child(tab.title.clone()),
             )
+            .when(transaction, |tab| {
+                tab.child(
+                    div()
+                        .flex_shrink_0()
+                        .px_1()
+                        .rounded(theme::RADIUS)
+                        .bg(theme::PORT)
+                        .text_size(px(10.))
+                        .text_color(theme::AMBER_TEXT)
+                        .child("TX"),
+                )
+            })
             .child(state_shape(state.as_ref(), ink))
             .child(
                 Button::new(("close-tab", id))
@@ -361,6 +374,7 @@ impl Workspace {
         } else {
             tf("{open} open", &[("open", &open.to_string())])
         };
+        let store = self.store.read(cx);
         let active = self.active_tab().map(|tab| {
             let identity = self.identity(&tab.connection, cx);
             let path = self
@@ -397,6 +411,14 @@ impl Workspace {
                         .when(held, |state| state.text_color(theme::RED_TEXT))
                         .child(state),
                 )
+                .when(store.in_transaction(&tab.connection), |line| {
+                    line.child(
+                        div()
+                            .flex_shrink_0()
+                            .text_color(theme::AMBER_TEXT)
+                            .child(t("Transaction open")),
+                    )
+                })
                 .children(summary.map(|summary| div().flex_shrink_0().child(summary)))
         });
 

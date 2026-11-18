@@ -213,6 +213,8 @@ impl Navigator {
             .app()
             .state::<SessionManager>()
             .disconnect(id);
+        self.store
+            .update(cx, |store, cx| store.set_transaction(id, false, cx));
         self.states.remove(id);
         self.rebuild(cx);
     }
@@ -854,14 +856,28 @@ impl Render for Navigator {
                 let toggle = {
                     let (navigator, id) = (navigator.clone(), id.clone());
                     PopupMenuItem::new(if open { t("Disconnect") } else { t("Connect") }).on_click(
-                        move |_, _, cx| {
-                            navigator.update(cx, |this, cx| {
-                                if open {
-                                    this.disconnect(&id, cx);
-                                } else {
-                                    this.connect(id.clone(), cx);
-                                }
-                            });
+                        move |_, window, cx| {
+                            if !open {
+                                navigator.update(cx, |this, cx| this.connect(id.clone(), cx));
+                                return;
+                            }
+                            let held = navigator.read(cx).store.read(cx).in_transaction(&id);
+                            if !held {
+                                navigator.update(cx, |this, cx| this.disconnect(&id, cx));
+                                return;
+                            }
+                            let (navigator, id) = (navigator.clone(), id.clone());
+                            common::confirm_delete(
+                                t("Roll back and disconnect?"),
+                                t("A transaction is open on this connection. Disconnecting rolls it back."),
+                                None,
+                                t("Roll back"),
+                                window,
+                                cx,
+                                move |_, cx| {
+                                    navigator.update(cx, |this, cx| this.disconnect(&id, cx));
+                                },
+                            );
                         },
                     )
                 };

@@ -164,6 +164,14 @@ impl Session {
         }
     }
 
+    /// A transaction the user opened is still open, perhaps failed.
+    pub async fn in_transaction(&self) -> bool {
+        match self {
+            Session::Sqlite(session) => session.in_transaction().await,
+            Session::Postgres(session) => session.in_transaction().await,
+        }
+    }
+
     /// The server ended the connection, or the network to it dropped.
     pub fn is_closed(&self) -> bool {
         match self {

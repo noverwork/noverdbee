@@ -147,5 +147,13 @@
  "Schemas…": "Schema…",
  "History": "歷史紀錄",
  "Nothing has run on this connection yet.": "這個連線還沒有執行過任何 SQL。",
- "The connection had closed and was opened again. Anything uncommitted on it was lost.": "連線曾中斷，已重新連上。之前未 commit 的變更都已遺失。"
+ "The connection had closed and was opened again. Anything uncommitted on it was lost.": "連線曾中斷，已重新連上。之前未 commit 的變更都已遺失。",
+ "Begin": "開始交易",
+ "Commit": "Commit",
+ "Rollback": "Rollback",
+ "TRANSACTION OPEN": "交易進行中",
+ "Transaction open": "交易進行中",
+ "Roll back and disconnect?": "要 rollback 並中斷連線嗎？",
+ "A transaction is open on this connection. Disconnecting rolls it back.": "這個連線有進行中的交易，中斷連線會 rollback。",
+ "Roll back": "Rollback"
 }

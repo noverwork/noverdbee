@@ -509,3 +509,81 @@ async fn postgres_reopens_a_session_the_server_closed() {
     assert!(!second.is_closed());
     assert_eq!(rows(&second, "SELECT 1").await.rows, [cells(&[Some("1")])]);
 }
+
+#[tokio::test]
+async fn sqlite_reports_an_open_transaction() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let session = Session::open(&record(&directory, false))
+        .await
+        .expect("open");
+    assert!(!session.in_transaction().await);
+    session.run("BEGIN".to_string()).await;
+    assert!(session.in_transaction().await);
+    session.run("ROLLBACK".to_string()).await;
+    assert!(!session.in_transaction().await);
+}
+
+/// Needs a server, as above.
+#[tokio::test]
+async fn postgres_reports_an_open_and_a_failed_transaction() {
+    let Ok(url) = std::env::var("NOVERDBEE_TEST_PG_URL") else {
+        eprintln!("skipped: NOVERDBEE_TEST_PG_URL is not set");
+        return;
+    };
+    let session = Session::open(&pg_record(&url)).await.expect("connect");
+    assert!(!session.in_transaction().await);
+    session.run("BEGIN".to_string()).await;
+    assert!(session.in_transaction().await);
+    session.run("SELECT 1 / 0".to_string()).await;
+    assert!(
+        session.in_transaction().await,
+        "a failed transaction is still open"
+    );
+    session.run("ROLLBACK".to_string()).await;
+    assert!(!session.in_transaction().await);
+}
+
+/// What a table tab's save does inside a transaction the user opened: a
+/// failed save rolls back to its savepoint and the user's work survives.
+async fn a_failed_save_keeps_the_open_transaction(session: &Session, table: &str) {
+    session
+        .run(format!("CREATE TABLE {table} (id INTEGER PRIMARY KEY)"))
+        .await;
+    session
+        .run(format!("BEGIN; INSERT INTO {table} VALUES (1)"))
+        .await;
+    session
+        .run(format!(
+            "SAVEPOINT noverdbee_save; INSERT INTO {table} VALUES (1); RELEASE SAVEPOINT noverdbee_save;"
+        ))
+        .await;
+    session
+        .run("ROLLBACK TO SAVEPOINT noverdbee_save; RELEASE SAVEPOINT noverdbee_save".to_string())
+        .await;
+    assert!(session.in_transaction().await);
+    let count = rows(session, &format!("SELECT count(*) FROM {table}")).await;
+    assert_eq!(count.rows, [cells(&[Some("1")])]);
+    session.run("ROLLBACK".to_string()).await;
+    session.run(format!("DROP TABLE {table}")).await;
+}
+
+#[tokio::test]
+async fn sqlite_a_failed_save_keeps_the_open_transaction() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let session = Session::open(&record(&directory, false))
+        .await
+        .expect("open");
+    a_failed_save_keeps_the_open_transaction(&session, "saves").await;
+}
+
+/// Needs a server, as above.
+#[tokio::test]
+async fn postgres_a_failed_save_keeps_the_open_transaction() {
+    let Ok(url) = std::env::var("NOVERDBEE_TEST_PG_URL") else {
+        eprintln!("skipped: NOVERDBEE_TEST_PG_URL is not set");
+        return;
+    };
+    let session = Session::open(&pg_record(&url)).await.expect("connect");
+    let table = format!("noverdbee_saves_{}", std::process::id());
+    a_failed_save_keeps_the_open_transaction(&session, &table).await;
+}

@@ -104,7 +104,7 @@ fn save_failure(results: &[StatementResult], expected: usize) -> Option<String> 
     for (index, result) in results.iter().enumerate() {
         match &result.outcome {
             Outcome::Error { message, .. } => return Some(message.clone()),
-            // The first result is BEGIN and the last is COMMIT.
+            // The first result opens the transaction and the last ends it.
             Outcome::Affected(count) if (1..=expected).contains(&index) && *count != 1 => {
                 return Some(format!(
                     "statement {index} changed {count} rows instead of 1"
@@ -828,7 +828,9 @@ impl TableView {
         });
     }
 
-    /// Writes every staged change in one transaction, or none of them.
+    /// Writes every staged change in one transaction, or none of them. Inside
+    /// a transaction the user opened, a savepoint stands in for it, so a
+    /// failed save leaves their transaction as it was.
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.commit(cx);
         let statements = self.statements(cx);
@@ -836,19 +838,32 @@ impl TableView {
             return;
         }
         let expected = statements.len();
-        let ran = self.run(format!("BEGIN;\n{};\nCOMMIT;", statements.join(";\n")), cx);
-        let undo = self.run("ROLLBACK".to_string(), cx);
+        let record = self.store.read(cx).connection(&self.connection).cloned();
+        let app = self.store.read(cx).app();
+        let saved = backend(async move {
+            let record = record.ok_or("the connection was deleted")?;
+            let session = app.state::<SessionManager>().connect(&record).await?;
+            let (open, close, undo) = if session.in_transaction().await {
+                (
+                    "SAVEPOINT noverdbee_save",
+                    "RELEASE SAVEPOINT noverdbee_save",
+                    "ROLLBACK TO SAVEPOINT noverdbee_save; RELEASE SAVEPOINT noverdbee_save",
+                )
+            } else {
+                ("BEGIN", "COMMIT", "ROLLBACK")
+            };
+            let sql = format!("{open};\n{};\n{close};", statements.join(";\n"));
+            let failure = save_failure(&session.run(sql).await, expected);
+            if failure.is_some() {
+                session.run(undo.to_string()).await;
+            }
+            Ok::<_, String>(failure)
+        });
         self.saving = true;
         self.error = None;
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
-            let failure = match ran.await {
-                Ok(results) => save_failure(&results, expected),
-                Err(error) => Some(error),
-            };
-            if failure.is_some() {
-                let _ = undo.await;
-            }
+            let failure = saved.await.unwrap_or_else(Some);
             let _ = this.update_in(cx, |this, window, cx| {
                 this.saving = false;
                 match failure {
