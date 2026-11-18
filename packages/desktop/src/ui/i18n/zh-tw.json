@@ -257,5 +257,7 @@
  "Host name is required": "必須填寫主機名稱",
  "Username is required": "必須填寫使用者名稱",
  "Key + Password": "金鑰 + 密碼",
- "SSH Key": "SSH 金鑰"
+ "SSH Key": "SSH 金鑰",
+ "Import from file": "從檔案匯入",
+ "Import": "匯入"
 }
