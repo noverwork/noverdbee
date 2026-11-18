@@ -33,6 +33,8 @@ mod shots {
             let steps = (duration.as_millis() / 50).max(1);
             for _ in 0..steps {
                 std::thread::sleep(Duration::from_millis(50));
+                // Timers run on the test clock, which only moves when told to.
+                self.cx.advance_clock(Duration::from_millis(50));
                 self.cx.run_until_parked();
             }
         }
