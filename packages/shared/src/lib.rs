@@ -70,7 +70,7 @@ pub struct DbConnectionRecord {
     pub mcp: McpAccess,
     /// Empty connects directly, `ssh` goes through an SSH server, `kubernetes` to a
     /// pod in a cluster. `host` and `port` are the target either way;
-    /// kubernetes ignores `host`.
+    /// kubernetes has no `host`.
     pub tunnel: String,
     pub ssh_host: String,
     pub ssh_port: i32,

@@ -66,7 +66,8 @@ fn validate(record: &DbConnectionRecord, port: &str, ssh_port: &str) -> Errors {
         path: (!postgres)
             .then(|| missing(&record.path, "Choose a database file"))
             .flatten(),
-        host: postgres
+        // A Kubernetes tunnel reaches the pod by its resource, not a host.
+        host: (postgres && !kubernetes)
             .then(|| missing(&record.host, "Host is required"))
             .flatten(),
         port: postgres.then(|| port_error(port)).flatten(),
@@ -304,7 +305,7 @@ impl DbConnectionForm {
                     String::new()
                 },
                 tunnel,
-                host: text(&self.host),
+                host: when(!kubernetes, &self.host),
                 port: text(&self.port).parse().unwrap_or(0),
                 database: text(&self.database),
                 username: text(&self.username),
@@ -492,23 +493,32 @@ impl DbConnectionForm {
             })
     }
 
-    fn render_server(&self) -> Div {
-        common::form_section("server", t("Server"), None)
-            .child(
-                h_flex()
-                    .items_start()
-                    .gap_3()
-                    .child(div().flex_1().min_w_0().child(common::field(
-                        t("Host"),
-                        Input::new(&self.host),
-                        self.errors.host.map(t),
-                    )))
-                    .child(div().w_32().child(common::field(
-                        t("Port"),
-                        Input::new(&self.port),
-                        self.errors.port.map(t),
-                    ))),
+    fn render_server(&self, cx: &App) -> Div {
+        let kubernetes = common::selected(&self.tunnel, cx).as_deref() == Some(TUNNEL_KUBERNETES);
+        let address = if kubernetes {
+            // The tunnel's resource names the pod; only the port is needed.
+            common::field(
+                t("Service or container port"),
+                Input::new(&self.port),
+                self.errors.port.map(t),
             )
+        } else {
+            h_flex()
+                .items_start()
+                .gap_3()
+                .child(div().flex_1().min_w_0().child(common::field(
+                    t("Host"),
+                    Input::new(&self.host),
+                    self.errors.host.map(t),
+                )))
+                .child(div().w_32().child(common::field(
+                    t("Port"),
+                    Input::new(&self.port),
+                    self.errors.port.map(t),
+                )))
+        };
+        common::form_section("server", t("Server"), None)
+            .child(address)
             .child(common::field(
                 t("Database"),
                 Input::new(&self.database),
@@ -673,7 +683,7 @@ impl Render for DbConnectionForm {
             );
         let postgres = self.is_postgres(cx);
         let details = if postgres {
-            self.render_server()
+            self.render_server(cx)
         } else {
             self.render_file(cx)
         };
@@ -797,6 +807,7 @@ mod tests {
         assert_eq!(validate(&ssh, "5432", "22"), Errors::default());
 
         let kubernetes = DbConnectionRecord {
+            host: String::new(),
             tunnel: TUNNEL_KUBERNETES.to_string(),
             ..postgres
         };

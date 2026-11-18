@@ -187,5 +187,6 @@
  "Resource is required": "請輸入資源",
  "Quit noverdbee": "結束 noverdbee",
  "Kubeconfig": "Kubeconfig",
- "Kubeconfig is required": "請貼上 kubeconfig"
+ "Kubeconfig is required": "請貼上 kubeconfig",
+ "Service or container port": "Service 或 container 的連接埠"
 }

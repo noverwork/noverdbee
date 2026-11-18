@@ -51,7 +51,12 @@ impl PostgresSession {
         };
         let mut config = tokio_postgres::Config::new();
         config
-            .host(&record.host)
+            // A Kubernetes tunnel has no host; the forward is on this machine.
+            .host(if record.host.is_empty() {
+                "localhost"
+            } else {
+                &record.host
+            })
             .port(port)
             .user(&record.username)
             .password(&record.password)
