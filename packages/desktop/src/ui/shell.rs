@@ -44,7 +44,18 @@ pub struct Shell {
 impl Shell {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let store = store(cx);
-        let changes = cx.observe(&store, |_, _, cx| cx.notify());
+        let mut route = store.read(cx).route.clone();
+        let changes = cx.observe_in(&store, window, move |this, store, window, cx| {
+            let now = store.read(cx).route.clone();
+            // The page left behind may have held the focus.
+            if now != route && now == Route::Databases {
+                if let Some(workspace) = &this.workspace {
+                    workspace.read(cx).focus_handle().focus(window, cx);
+                }
+            }
+            route = now;
+            cx.notify();
+        });
         views::start_update_check(window, cx);
         Self {
             workspace: None,

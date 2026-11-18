@@ -34,6 +34,11 @@ actions!(
     ]
 );
 
+/// Shows the tab at this index.
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = noverdbee, no_json)]
+pub struct SelectTab(pub usize);
+
 pub fn bind_keys(cx: &mut App) {
     // Cmd on macOS; Ctrl elsewhere.
     let modifier = if cfg!(target_os = "macos") {
@@ -41,8 +46,8 @@ pub fn bind_keys(cx: &mut App) {
     } else {
         "ctrl"
     };
-    let key = |keys: &str| format!("{modifier}-{keys}").leak() as &str;
-    cx.bind_keys([
+    let key = |keys: &str| -> &'static str { format!("{modifier}-{keys}").leak() };
+    let mut bindings = vec![
         KeyBinding::new(key("t"), NewEditor, Some(CONTEXT)),
         KeyBinding::new(key("o"), OpenFile, Some(CONTEXT)),
         KeyBinding::new(key("w"), CloseTab, Some(CONTEXT)),
@@ -51,7 +56,16 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-tab", NextTab, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-tab", PreviousTab, Some(CONTEXT)),
         KeyBinding::new(key("p"), FilterTables, Some(CONTEXT)),
-    ]);
+    ];
+    for index in 0..9 {
+        let digit = (index + 1).to_string();
+        bindings.push(KeyBinding::new(
+            key(&digit),
+            SelectTab(index),
+            Some(CONTEXT),
+        ));
+    }
+    cx.bind_keys(bindings);
 }
 
 const CONTEXT: &str = "Workspace";
@@ -142,6 +156,8 @@ impl Workspace {
                 },
             ),
         ];
+        let focus = cx.focus_handle();
+        focus.focus(window, cx);
         Self {
             store,
             navigator,
@@ -149,7 +165,7 @@ impl Workspace {
             active: None,
             next_tab: 0,
             queries: 0,
-            focus: cx.focus_handle(),
+            focus,
             _subscriptions,
         }
     }
@@ -195,8 +211,7 @@ impl Workspace {
             _observer: cx.observe(&editor, |_, _, cx| cx.notify()),
             view: TabView::Editor(editor.clone()),
         });
-        self.active = Some(id);
-        cx.notify();
+        self.show(id, window, cx);
         editor
     }
 
@@ -212,9 +227,8 @@ impl Workspace {
             TabView::Table(view) => tab.connection == connection && view.read(cx).table() == &table,
             TabView::Editor(_) => false,
         });
-        if let Some(tab) = open {
-            self.active = Some(tab.id);
-            cx.notify();
+        if let Some(id) = open.map(|tab| tab.id) {
+            self.show(id, window, cx);
             return;
         }
         let info = match self.navigator.read(cx).state(&connection) {
@@ -235,8 +249,24 @@ impl Workspace {
             _observer: cx.observe(&view, |_, _, cx| cx.notify()),
             view: TabView::Table(view),
         });
+        self.show(id, window, cx);
+    }
+
+    /// Shows tab `id` and moves the focus into it: an editor gets the cursor,
+    /// a table the workspace. The tab that held the focus may no longer be
+    /// drawn, and keys would then reach nothing.
+    fn show(&mut self, id: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.active = Some(id);
+        match self.active_editor() {
+            Some(editor) => editor.focus_handle(cx).focus(window, cx),
+            None => self.focus.focus(window, cx),
+        }
         cx.notify();
+    }
+
+    /// Focused, it keeps the workspace shortcuts working.
+    pub fn focus_handle(&self) -> FocusHandle {
+        self.focus.clone()
     }
 
     /// Closes a tab, asking first when it holds edits that are not saved.
@@ -313,13 +343,12 @@ impl Workspace {
     }
 
     /// Shows the tab `step` places after the one shown, wrapping around.
-    fn cycle(&mut self, step: isize, cx: &mut Context<Self>) {
+    fn cycle(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.tabs.iter().position(|tab| Some(tab.id) == self.active) else {
             return;
         };
         let next = (index as isize + step).rem_euclid(self.tabs.len() as isize) as usize;
-        self.active = Some(self.tabs[next].id);
-        cx.notify();
+        self.show(self.tabs[next].id, window, cx);
     }
 
     /// Where the `+` button opens an editor: the connection of the tab shown,
@@ -398,10 +427,9 @@ impl Workspace {
                         .hover(|style| style.border_color(theme::STENCIL.opacity(0.25)))
                 }
             })
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_click(cx.listener(move |this, _, window, cx| {
                 if this.tabs.iter().any(|tab| tab.id == id) {
-                    this.active = Some(id);
-                    cx.notify();
+                    this.show(id, window, cx);
                 }
             }))
             .child(
@@ -621,8 +649,13 @@ impl Render for Workspace {
                     this.request_close(id, window, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &NextTab, _, cx| this.cycle(1, cx)))
-            .on_action(cx.listener(|this, _: &PreviousTab, _, cx| this.cycle(-1, cx)))
+            .on_action(cx.listener(|this, _: &NextTab, window, cx| this.cycle(1, window, cx)))
+            .on_action(cx.listener(|this, _: &PreviousTab, window, cx| this.cycle(-1, window, cx)))
+            .on_action(cx.listener(|this, action: &SelectTab, window, cx| {
+                if let Some(id) = this.tabs.get(action.0).map(|tab| tab.id) {
+                    this.show(id, window, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &FilterTables, window, cx| {
                 this.navigator
                     .update(cx, |navigator, cx| navigator.focus_filter(window, cx));

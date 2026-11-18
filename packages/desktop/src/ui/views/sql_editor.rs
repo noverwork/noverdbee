@@ -735,6 +735,13 @@ fn show_history(
     })
 }
 
+/// Focusing the tab puts the cursor in the editor.
+impl Focusable for SqlEditor {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.editor.focus_handle(cx)
+    }
+}
+
 impl Render for SqlEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
