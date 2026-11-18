@@ -1504,6 +1504,7 @@ dependencies = [
  "gpui-pre",
  "gpui-pre-platform",
  "libsqlite3-sys",
+ "lsp-types",
  "minisign-verify",
  "native-tls",
  "orm",

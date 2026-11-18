@@ -98,6 +98,36 @@ impl SqliteSession {
         self.interrupt.interrupt();
     }
 
+    /// Prepares each statement in `sql` without running it, and returns the
+    /// first error with its byte offset. Skipped while a statement runs.
+    // ponytail: a statement that needs an earlier one in `sql` to have run
+    // (CREATE TABLE t, then INSERT INTO t) reports "no such table"; check
+    // syntax only if that turns out to be common.
+    pub async fn check(&self, sql: String) -> Option<(String, usize)> {
+        let connection = self.connection.clone();
+        tokio::task::spawn_blocking(move || {
+            let connection = connection.try_lock().ok()?;
+            let mut batch = Batch::new(&connection, &sql);
+            loop {
+                match batch.next() {
+                    Ok(Some(_)) => {}
+                    Ok(None) => return None,
+                    Err(error) => {
+                        return match failure(error, &sql) {
+                            Outcome::Error { message, position } => {
+                                Some((message, position.unwrap_or(0)))
+                            }
+                            _ => None,
+                        }
+                    }
+                }
+            }
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
     /// Runs one statement that must not write, and returns up to `limit` rows
     /// as JSON objects, plus whether more rows existed.
     pub async fn select_json(

@@ -163,6 +163,35 @@ async fn a_read_only_session_rejects_writes_and_a_non_database_is_rejected() {
     assert!(Session::open(&bad).await.is_err());
 }
 
+#[tokio::test]
+async fn sqlite_check_parses_without_running() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let session = Session::open(&record(&directory, false))
+        .await
+        .expect("open");
+    session.run("CREATE TABLE t (x)".to_string()).await;
+
+    assert_eq!(
+        session
+            .check("SELECT x FROM t; DELETE FROM t".to_string())
+            .await,
+        None
+    );
+    let sql = "INSERT INTO t VALUES (1); SELECT * FROM t WHERE; SELECT 1";
+    let (message, at) = session.check(sql.to_string()).await.expect("an error");
+    assert!(message.contains("syntax error"), "{message}");
+    assert_eq!(&sql[at..at + 1], ";");
+    let (message, _) = session
+        .check("SELECT nope FROM t".to_string())
+        .await
+        .expect("an error");
+    assert!(message.contains("nope"), "{message}");
+    assert_eq!(
+        rows(&session, "SELECT count(*) FROM t").await.rows,
+        [cells(&[Some("0")])]
+    );
+}
+
 /// A connection record for the server at `url`.
 fn pg_record(url: &str) -> DbConnectionRecord {
     let config: tokio_postgres::Config = url.parse().expect("a PostgreSQL URL");
@@ -282,6 +311,38 @@ async fn postgres_runs_lists_edits_and_points_at_errors() {
     };
     assert!(message.contains("syntax error"), "{message}");
     assert_eq!(position.map(|at| &bad[at..]), Some(";"));
+
+    // The check parses on its own connection, so a bad statement leaves the
+    // transaction the user opened alone, and nothing it checks runs.
+    session
+        .run(format!(
+            "BEGIN; INSERT INTO {schema}.notes (body) VALUES ('kept')"
+        ))
+        .await;
+    assert_eq!(
+        session
+            .check(format!("SELECT 1; DELETE FROM {schema}.notes"))
+            .await,
+        None
+    );
+    let (message, at) = session.check(bad.clone()).await.expect("an error");
+    assert!(message.contains("syntax error"), "{message}");
+    assert_eq!(&bad[at..], ";");
+    let missing = format!("SELECT 1;\nSELECT * FROM {schema}.missing");
+    let (message, at) = session.check(missing.clone()).await.expect("an error");
+    assert!(message.contains("missing"), "{message}");
+    assert!(
+        missing[at..].starts_with(&format!("{schema}.missing")),
+        "{at}"
+    );
+    let outcome = session
+        .run("COMMIT".to_string())
+        .await
+        .pop()
+        .map(|result| result.outcome);
+    assert_eq!(outcome, Some(Outcome::Affected(0)));
+    let count = format!("SELECT count(*) FROM {schema}.notes WHERE body = 'kept'");
+    assert_eq!(rows(&session, &count).await.rows, [cells(&[Some("1")])]);
 
     session.run(format!("DROP SCHEMA {schema} CASCADE")).await;
 }

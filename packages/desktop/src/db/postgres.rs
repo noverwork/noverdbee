@@ -8,7 +8,7 @@ use tokio_postgres::config::SslMode;
 use tokio_postgres::error::ErrorPosition;
 use tokio_postgres::{CancelToken, Client, SimpleQueryMessage};
 
-use super::sql::quote_literal;
+use super::sql::{quote_literal, split_statements};
 use super::{
     Column, ColumnInfo, ObjectKind, Outcome, ResultSet, StatementResult, TableInfo, TableRef,
     ROW_LIMIT,
@@ -19,6 +19,9 @@ pub struct PostgresSession {
     client: Arc<Client>,
     cancel: CancelToken,
     tls: MakeTlsConnector,
+    config: tokio_postgres::Config,
+    /// A second connection that only parses, for [`PostgresSession::check`].
+    checker: Arc<tokio::sync::Mutex<Option<Client>>>,
 }
 
 impl fmt::Debug for PostgresSession {
@@ -65,6 +68,8 @@ impl PostgresSession {
             cancel: client.cancel_token(),
             client: Arc::new(client),
             tls,
+            config,
+            checker: Arc::default(),
         })
     }
 
@@ -134,6 +139,48 @@ impl PostgresSession {
             }
         }
         results
+    }
+
+    /// Has the server parse each statement in `sql` without running it, and
+    /// returns the first error with its byte offset. It parses on a connection
+    /// of its own: a failed parse inside a transaction the user opened would
+    /// abort that transaction.
+    pub async fn check(&self, sql: String) -> Option<(String, usize)> {
+        let mut checker = self.checker.lock().await;
+        if checker.as_ref().is_none_or(Client::is_closed) {
+            *checker = self
+                .open_checker()
+                .await
+                .inspect_err(|error| tracing::warn!(%error, "cannot open the SQL checker"))
+                .ok();
+        }
+        let client = checker.as_ref()?;
+        for range in split_statements(&sql) {
+            let statement = &sql[range.clone()];
+            if let Err(error) = client.prepare(statement).await {
+                // Not the user's SQL: the connection or a timeout failed.
+                error.as_db_error()?;
+                let at = position(&error, statement).unwrap_or(0);
+                return Some((describe(&error), range.start + at));
+            }
+        }
+        None
+    }
+
+    async fn open_checker(&self) -> Result<Client, String> {
+        let (client, connection) = self
+            .config
+            .connect(self.tls.clone())
+            .await
+            .map_err(|error| describe(&error))?;
+        tokio::spawn(connection);
+        // Parsing a query takes table locks; give up rather than queue behind
+        // a migration.
+        client
+            .batch_execute("SET lock_timeout = '1s'; SET statement_timeout = '3s'")
+            .await
+            .map_err(|error| describe(&error))?;
+        Ok(client)
     }
 
     /// The last result of `sql`, which must be rows.
@@ -303,7 +350,11 @@ fn position(error: &tokio_postgres::Error, sql: &str) -> Option<usize> {
     match error.as_db_error()?.position()? {
         ErrorPosition::Original(character) => {
             let index = usize::try_from(*character).ok()?.checked_sub(1)?;
-            sql.char_indices().nth(index).map(|(offset, _)| offset)
+            // "at end of input" points one past the last character.
+            sql.char_indices()
+                .map(|(offset, _)| offset)
+                .chain([sql.len()])
+                .nth(index)
         }
         ErrorPosition::Internal { .. } => None,
     }
