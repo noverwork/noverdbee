@@ -3,6 +3,7 @@
 //! open survives a visit to another page.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::resizable::{h_resizable, resizable_panel};
 use gpui_kit::component::{h_flex, v_flex, Disableable as _, Sizable as _, WindowExt as _};
@@ -269,14 +270,15 @@ impl Workspace {
         self.focus.clone()
     }
 
-    /// Closes a tab, asking first when it holds edits that are not saved.
-    fn request_close(&mut self, id: usize, window: &mut Window, cx: &mut Context<Self>) {
+    /// Closes the tabs `ids`, asking first when one holds edits that are not
+    /// saved.
+    fn request_close(&mut self, ids: Vec<usize>, window: &mut Window, cx: &mut Context<Self>) {
         let pending = self.tabs.iter().any(|tab| {
-            tab.id == id
+            ids.contains(&tab.id)
                 && matches!(&tab.view, TabView::Table(view) if view.read(cx).pending(cx) > 0)
         });
         if !pending {
-            self.close(id, window, cx);
+            self.close(&ids, window, cx);
             return;
         }
         let workspace = cx.weak_entity();
@@ -288,21 +290,23 @@ impl Workspace {
             window,
             cx,
             move |window, cx| {
-                let _ = workspace.update(cx, |this, cx| this.close(id, window, cx));
+                let _ = workspace.update(cx, |this, cx| this.close(&ids, window, cx));
             },
         );
     }
 
-    fn close(&mut self, id: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(index) = self.tabs.iter().position(|tab| tab.id == id) else {
-            return;
-        };
-        self.tabs.remove(index);
-        if self.active == Some(id) {
-            let neighbour = index.min(self.tabs.len().saturating_sub(1));
-            self.active = self.tabs.get(neighbour).map(|tab| tab.id);
-            // The closed tab held the focus.
-            self.focus.focus(window, cx);
+    fn close(&mut self, ids: &[usize], window: &mut Window, cx: &mut Context<Self>) {
+        let shown = self.tabs.iter().position(|tab| Some(tab.id) == self.active);
+        self.tabs.retain(|tab| !ids.contains(&tab.id));
+        if let Some(index) = shown.filter(|_| self.active_tab().is_none()) {
+            // The closed tab held the focus; the one now in its place takes it.
+            match self.tabs.get(index.min(self.tabs.len().saturating_sub(1))) {
+                Some(tab) => self.show(tab.id, window, cx),
+                None => {
+                    self.active = None;
+                    self.focus.focus(window, cx);
+                }
+            }
         }
         cx.notify();
     }
@@ -396,6 +400,10 @@ impl Workspace {
             }
         };
         let transaction = self.store.read(cx).in_transaction(&tab.connection);
+        let ids: Vec<usize> = self.tabs.iter().map(|tab| tab.id).collect();
+        let index = ids.iter().position(|tab| *tab == id).unwrap_or(0);
+        let others: Vec<usize> = ids.iter().copied().filter(|tab| *tab != id).collect();
+        let workspace = cx.weak_entity();
         let state = if running {
             Some(ConnectionState::Connecting)
         } else {
@@ -474,10 +482,31 @@ impl Workspace {
                     .xsmall()
                     .icon(lucide("x"))
                     .tooltip(t("Close tab"))
-                    .on_click(
-                        cx.listener(move |this, _, window, cx| this.request_close(id, window, cx)),
-                    ),
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.request_close(vec![id], window, cx)
+                    })),
             )
+            .context_menu(move |menu, _, _| {
+                let close = |label: SharedString, targets: Vec<usize>| {
+                    let workspace = workspace.clone();
+                    PopupMenuItem::new(label)
+                        .disabled(targets.is_empty())
+                        .on_click(move |_, window, cx| {
+                            let targets = targets.clone();
+                            let _ = workspace
+                                .update(cx, |this, cx| this.request_close(targets, window, cx));
+                        })
+                };
+                menu.item(close(t("Close"), vec![id]))
+                    .item(close(t("Close Other Tabs"), others.clone()))
+                    .item(close(t("Close Tabs to the Left"), ids[..index].to_vec()))
+                    .item(close(
+                        t("Close Tabs to the Right"),
+                        ids[index + 1..].to_vec(),
+                    ))
+                    .separator()
+                    .item(close(t("Close All Tabs"), ids.clone()))
+            })
     }
 
     fn render_strip(&self, cx: &Context<Self>) -> impl IntoElement {
@@ -636,6 +665,8 @@ impl Render for Workspace {
         };
         v_flex()
             .size_full()
+            .id("workspace")
+            .role(Role::Group)
             .key_context(CONTEXT)
             .track_focus(&self.focus)
             .on_action(cx.listener(|this, _: &NewEditor, window, cx| {
@@ -646,7 +677,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &OpenFile, window, cx| this.open_file(window, cx)))
             .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
                 if let Some(id) = this.active {
-                    this.request_close(id, window, cx);
+                    this.request_close(vec![id], window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &NextTab, window, cx| this.cycle(1, window, cx)))

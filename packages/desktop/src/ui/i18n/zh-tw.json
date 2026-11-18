@@ -162,5 +162,10 @@
  "Closing the tab drops the changes that have not been saved.": "關閉分頁會丟掉尚未儲存的變更。",
  "Save to file (Cmd+S)": "存成檔案 (Cmd+S)",
  "Open": "開啟",
- "Open a .sql file (Cmd+O)": "開啟 .sql 檔 (Cmd+O)"
+ "Open a .sql file (Cmd+O)": "開啟 .sql 檔 (Cmd+O)",
+ "Close": "關閉",
+ "Close Other Tabs": "關閉其他分頁",
+ "Close Tabs to the Left": "關閉左側分頁",
+ "Close Tabs to the Right": "關閉右側分頁",
+ "Close All Tabs": "關閉所有分頁"
 }
