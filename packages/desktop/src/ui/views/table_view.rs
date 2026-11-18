@@ -2,6 +2,7 @@
 //! are staged in the grid and written only when the user saves them.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -481,12 +482,24 @@ pub struct TableView {
     saving: bool,
     /// Whether the connection was read-only when the grid was built.
     read_only: bool,
+    /// When the rows shown were loaded, as `14:02:31`; proof that a reload ran
+    /// when the rows came back the same.
+    loaded_at: Option<SharedString>,
+    structure_loading: bool,
+    /// Set for a moment at each reload, so the rows stay hidden long enough
+    /// to be seen even when the database answers at once.
+    reloading: bool,
+    /// Whether a reload from the first row is running.
+    replacing: bool,
     error: Option<SharedString>,
     structure: Vec<Section>,
     section: usize,
     _subscriptions: Vec<Subscription>,
     _edit: Option<Subscription>,
 }
+
+/// How long the rows stay hidden at a reload, at least.
+const RELOAD_BLINK: Duration = Duration::from_millis(200);
 
 impl TableView {
     /// Whether the connection is marked read-only; its rows cannot be edited.
@@ -535,6 +548,10 @@ impl TableView {
             loading: false,
             saving: false,
             read_only: false,
+            loaded_at: None,
+            structure_loading: false,
+            reloading: false,
+            replacing: false,
             error: None,
             structure: Vec::new(),
             section: 0,
@@ -586,8 +603,14 @@ impl TableView {
         })
     }
 
-    /// Reloads from the first row, asking first when edits would be lost.
-    fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Reloads what the tab shows: the structure, or the rows from the first
+    /// one, asking first when edits would be lost.
+    pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.mode == Mode::Structure {
+            self.blink(cx);
+            self.load_structure(window, cx);
+            return;
+        }
         if self.pending(cx) == 0 {
             self.load(Load::Replace, window, cx);
             return;
@@ -604,6 +627,20 @@ impl TableView {
                 let _ = view.update(cx, |view, cx| view.load(Load::Replace, window, cx));
             },
         );
+    }
+
+    /// Hides what the tab shows for a moment; data and structure reload alike.
+    fn blink(&mut self, cx: &mut Context<Self>) {
+        self.reloading = true;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(RELOAD_BLINK).await;
+            let _ = this.update(cx, |this, cx| {
+                this.reloading = false;
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     fn load(&mut self, load: Load, window: &mut Window, cx: &mut Context<Self>) {
@@ -635,11 +672,16 @@ impl TableView {
         let ran = self.run(query, cx);
         self.loading = true;
         self.error = None;
+        if load == Load::Replace {
+            self.replacing = true;
+            self.blink(cx);
+        }
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
             let ran = ran.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.loading = false;
+                this.replacing = false;
                 let page =
                     ran.and_then(|mut results| match results.pop().map(|last| last.outcome) {
                         Some(Outcome::Rows(page)) => Ok(page),
@@ -659,6 +701,7 @@ impl TableView {
     fn show(&mut self, page: ResultSet, load: Load, window: &mut Window, cx: &mut Context<Self>) {
         let more = page.rows.len() == db::PAGE_SIZE;
         let rows = page.rows.into_iter().map(Row::saved);
+        self.loaded_at = Some(chrono::Local::now().format("%H:%M:%S").to_string().into());
         if let (Some(grid), Load::Append) = (&self.grid, load) {
             grid.update(cx, |grid, cx| {
                 let delegate = grid.delegate_mut();
@@ -901,7 +944,14 @@ impl TableView {
     pub fn show_structure(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.mode = Mode::Structure;
         cx.notify();
-        if !self.structure.is_empty() {
+        if self.structure.is_empty() {
+            self.load_structure(window, cx);
+        }
+    }
+
+    /// Reads the table's structure again and replaces what is shown.
+    fn load_structure(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.structure_loading {
             return;
         }
         let Some(record) = self.store.read(cx).connection(&self.connection).cloned() else {
@@ -909,6 +959,7 @@ impl TableView {
         };
         let app = self.store.read(cx).app();
         let table = self.info.table.clone();
+        self.structure_loading = true;
         cx.spawn_in(window, async move |this, cx| {
             let loaded = backend(async move {
                 let session = app.state::<SessionManager>().connect(&record).await?;
@@ -919,6 +970,8 @@ impl TableView {
             })
             .await;
             let _ = this.update_in(cx, |this, window, cx| {
+                this.structure_loading = false;
+                this.structure.clear();
                 match loaded {
                     Ok((queries, results)) => {
                         for ((title, _), result) in queries.into_iter().zip(results) {
@@ -984,8 +1037,8 @@ impl TableView {
                 mode("mode-structure", t("Structure"), Mode::Structure)
                     .on_click(cx.listener(|this, _, window, cx| this.show_structure(window, cx))),
             )
-            .when(self.mode == Mode::Data, |toolbar| {
-                toolbar
+            .map(|toolbar| match self.mode {
+                Mode::Data => toolbar
                     .child(
                         div()
                             .pl_2()
@@ -998,25 +1051,29 @@ impl TableView {
                             .flex_1()
                             .min_w_0()
                             .child(Input::new(&self.filter).xsmall().cleanable(true)),
-                    )
-                    .child(
-                        Button::new("refresh")
-                            .ghost()
-                            .small()
-                            .icon(lucide("refresh-cw"))
-                            .tooltip(t("Refresh"))
-                            .on_click(cx.listener(|this, _, window, cx| this.reload(window, cx))),
-                    )
-                    .when(editable, |toolbar| {
-                        toolbar.child(
-                            Button::new("add-row")
-                                .ghost()
-                                .small()
-                                .icon(lucide("plus"))
-                                .label(t("Row"))
-                                .on_click(cx.listener(|this, _, _, cx| this.add_row(cx))),
-                        )
-                    })
+                    ),
+                // Keeps Refresh at the right edge in both modes.
+                Mode::Structure => toolbar.child(div().flex_1()),
+            })
+            .child(
+                Button::new("refresh")
+                    .ghost()
+                    .small()
+                    .icon(lucide("refresh-cw"))
+                    .tooltip(t("Refresh (Cmd+R)"))
+                    // The spinner is the sign that a reload is running.
+                    .loading(self.loading || self.structure_loading)
+                    .on_click(cx.listener(|this, _, window, cx| this.reload(window, cx))),
+            )
+            .when(self.mode == Mode::Data && editable, |toolbar| {
+                toolbar.child(
+                    Button::new("add-row")
+                        .ghost()
+                        .small()
+                        .icon(lucide("plus"))
+                        .label(t("Row"))
+                        .on_click(cx.listener(|this, _, _, cx| this.add_row(cx))),
+                )
             })
     }
 
@@ -1081,11 +1138,43 @@ impl TableView {
             .text_size(px(11.))
             .text_color(theme::STENCIL_MUTE)
             .child(left)
-            .children(self.summary(cx))
+            .child(
+                h_flex()
+                    .gap_3()
+                    .children(
+                        self.loaded_at
+                            .clone()
+                            .map(|at| div().text_color(theme::STENCIL_FAINT).child(at)),
+                    )
+                    .children(self.summary(cx)),
+            )
+    }
+
+    /// The line in place of rows that are on their way.
+    fn render_loading(&self) -> AnyElement {
+        self.render_placeholder(t("Loading..."))
+    }
+
+    fn render_placeholder(&self, text: SharedString) -> AnyElement {
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_sm()
+            .text_color(theme::STENCIL_FAINT)
+            .child(text)
+            .into_any_element()
     }
 
     fn render_data(&self, cx: &Context<Self>) -> impl IntoElement {
-        let body = match &self.grid {
+        // The rows on screen are stale while a reload runs, so they go away
+        // until the new ones are in; the gap is what shows the reload ran.
+        let grid = self
+            .grid
+            .as_ref()
+            .filter(|_| !(self.reloading || self.replacing));
+        let body = match grid {
             Some(grid) => div()
                 .size_full()
                 .text_sm()
@@ -1105,19 +1194,8 @@ impl TableView {
                         .header_row_height(px(32.)),
                 )
                 .into_any_element(),
-            None => div()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_sm()
-                .text_color(theme::STENCIL_FAINT)
-                .child(if self.loading {
-                    t("Loading...")
-                } else {
-                    t("No rows")
-                })
-                .into_any_element(),
+            None if self.loading || self.reloading => self.render_loading(),
+            None => self.render_placeholder(t("No rows")),
         };
         v_flex()
             .size_full()
@@ -1180,6 +1258,11 @@ impl TableView {
                 .child(text.clone())
                 .into_any_element(),
             None => div().into_any_element(),
+        };
+        let body = if self.reloading || self.structure_loading {
+            self.render_loading()
+        } else {
+            body
         };
         v_flex()
             .size_full()

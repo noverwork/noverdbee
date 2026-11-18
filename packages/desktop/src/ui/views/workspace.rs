@@ -32,7 +32,8 @@ actions!(
         CloseTab,
         NextTab,
         PreviousTab,
-        FilterTables
+        FilterTables,
+        ReloadTable
     ]
 );
 
@@ -58,6 +59,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-tab", NextTab, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-tab", PreviousTab, Some(CONTEXT)),
         KeyBinding::new(key("p"), FilterTables, Some(CONTEXT)),
+        KeyBinding::new(key("r"), ReloadTable, Some(CONTEXT)),
     ];
     for index in 0..9 {
         let digit = (index + 1).to_string();
@@ -230,6 +232,12 @@ impl Workspace {
             TabView::Editor(_) => false,
         });
         if let Some(id) = open.map(|tab| tab.id) {
+            // Opening the table that is already in front reloads it.
+            if self.active == Some(id) {
+                if let Some(view) = self.active_table() {
+                    view.update(cx, |view, cx| view.reload(window, cx));
+                }
+            }
             self.show(id, window, cx);
             return;
         }
@@ -741,6 +749,11 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, action: &SelectTab, window, cx| {
                 if let Some(id) = this.tabs.get(action.0).map(|tab| tab.id) {
                     this.show(id, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ReloadTable, window, cx| {
+                if let Some(view) = this.active_table() {
+                    view.update(cx, |view, cx| view.reload(window, cx));
                 }
             }))
             .on_action(cx.listener(|this, _: &FilterTables, window, cx| {

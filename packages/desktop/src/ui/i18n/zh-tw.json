@@ -97,7 +97,7 @@
  "Delete rows": "刪除選取的列",
  "Pending changes": "待儲存的變更",
  "Structure": "結構",
- "Refresh": "重新整理",
+ "Refresh (Cmd+R)": "重新整理 (Cmd+R)",
  "Row": "新增列",
  "{count} pending changes": "{count} 筆待儲存",
  "Review SQL": "檢視 SQL",
