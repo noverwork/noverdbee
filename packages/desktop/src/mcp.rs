@@ -529,7 +529,7 @@ async fn list_connections(app: &AppHandle) -> Result<String, String> {
                 "name": record.name,
                 "driver": record.driver,
                 "environment": record.environment.as_str(),
-                "tools": tool_names(record.mcp),
+                "tools": tool_names(allowed_tools(record)),
             })
         })
         .collect();
@@ -537,6 +537,19 @@ async fn list_connections(app: &AppHandle) -> Result<String, String> {
         return Ok("No connection is shared with MCP. The user can allow tools on a connection in noverdbee.".to_string());
     }
     Ok(Value::from(shared).to_string())
+}
+
+/// The tools the user allowed, without the writing ones on a read-only
+/// connection.
+fn allowed_tools(record: &DbConnectionRecord) -> McpAccess {
+    if record.read_only {
+        McpAccess {
+            select: record.mcp.select,
+            ..McpAccess::default()
+        }
+    } else {
+        record.mcp
+    }
 }
 
 fn tool_names(access: McpAccess) -> Vec<&'static str> {
@@ -569,7 +582,7 @@ async fn connection(
         .ok_or_else(|| {
             format!("No connection named {name} is shared with MCP. Call list_connections.")
         })?;
-    if !allowed(record.mcp) {
+    if !allowed(allowed_tools(&record)) {
         return Err(format!(
             "{name} does not allow {tool} over MCP. The user can allow it in the connection's settings in noverdbee."
         ));

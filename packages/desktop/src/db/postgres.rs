@@ -56,6 +56,11 @@ impl PostgresSession {
         if !record.database.is_empty() {
             config.dbname(&record.database);
         }
+        if record.read_only {
+            // The server refuses writes in every transaction of the session.
+            // It guards against mistakes: `SET` can still turn it off.
+            config.options("-c default_transaction_read_only=on");
+        }
         let (client, connection) = config
             .connect(tls.clone())
             .await

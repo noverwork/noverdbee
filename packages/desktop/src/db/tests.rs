@@ -587,3 +587,27 @@ async fn postgres_a_failed_save_keeps_the_open_transaction() {
     let table = format!("noverdbee_saves_{}", std::process::id());
     a_failed_save_keeps_the_open_transaction(&session, &table).await;
 }
+
+#[tokio::test]
+async fn postgres_a_read_only_connection_refuses_writes() {
+    let Ok(url) = std::env::var("NOVERDBEE_TEST_PG_URL") else {
+        eprintln!("skipped: NOVERDBEE_TEST_PG_URL is not set");
+        return;
+    };
+    let record = DbConnectionRecord {
+        read_only: true,
+        ..pg_record(&url)
+    };
+    let session = Session::open(&record).await.expect("connect");
+    let table = format!("noverdbee_ro_{}", std::process::id());
+    let refused = session
+        .execute_one(format!("CREATE TABLE {table} (id int)"))
+        .await
+        .expect_err("a read-only session refuses CREATE TABLE");
+    assert!(refused.contains("read-only"), "{refused}");
+    let (rows, _) = session
+        .select_json("SELECT 1 AS one".to_string(), 10)
+        .await
+        .expect("reads still work");
+    assert_eq!(rows.len(), 1);
+}

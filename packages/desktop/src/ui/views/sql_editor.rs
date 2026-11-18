@@ -292,8 +292,9 @@ impl SqlEditor {
         );
     }
 
-    /// Records `sql` in the history and runs it.
-    fn start(&mut self, sql: String, base: usize, window: &mut Window, cx: &mut Context<Self>) {
+    /// Records `sql` in the history and runs it, without the production check.
+    /// `base` is where it starts in the editor.
+    pub fn start(&mut self, sql: String, base: usize, window: &mut Window, cx: &mut Context<Self>) {
         let app = self.store.read(cx).app();
         let (connection, saved) = (self.connection.clone(), sql.clone());
         crate::app::runtime().spawn(async move {

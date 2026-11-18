@@ -239,6 +239,36 @@ mod shots {
             })
             .ok();
 
+        // The connection is production, so writing SQL asks first.
+        stage
+            .cx
+            .update_window(stage.window, |_, window, cx| {
+                let shell = gpui_kit::base::Root::read(window, cx)
+                    .view()
+                    .clone()
+                    .downcast::<ui::shell::Shell>()
+                    .expect("the window shows the shell");
+                let workspace = shell.read(cx).workspace().expect("the workspace is open");
+                let editor = workspace
+                    .read(cx)
+                    .active_editor()
+                    .expect("an editor is open");
+                editor.update(cx, |editor, cx| {
+                    editor.set_text("DELETE FROM orders WHERE total < 50;", window, cx);
+                    editor.run(window, cx);
+                });
+            })
+            .ok();
+        stage.settle(Duration::from_millis(300));
+        stage.shoot("editor-production");
+        stage
+            .cx
+            .update_window(stage.window, |_, window, cx| {
+                use gpui_kit::component::WindowExt as _;
+                window.close_all_dialogs(cx)
+            })
+            .ok();
+
         // The open connection got an editor; run SQL in it, then SQL that fails.
         for (name, sql) in [
             (
@@ -268,7 +298,7 @@ mod shots {
                     let editor = workspace.read(cx).active_editor().expect("an editor is open");
                     editor.update(cx, |editor, cx| {
                         editor.set_text(sql, window, cx);
-                        editor.run(window, cx);
+                        editor.start(sql.to_string(), 0, window, cx);
                     });
                 })
                 .ok();
