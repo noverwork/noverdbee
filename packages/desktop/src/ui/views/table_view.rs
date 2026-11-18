@@ -487,6 +487,14 @@ pub struct TableView {
 }
 
 impl TableView {
+    /// Whether the connection is marked read-only; its rows cannot be edited.
+    fn read_only(&self, cx: &App) -> bool {
+        self.store
+            .read(cx)
+            .connection(&self.connection)
+            .is_some_and(|record| record.read_only)
+    }
+
     pub fn new(
         connection: String,
         info: TableInfo,
@@ -649,7 +657,7 @@ impl TableView {
         }
         // Views and tables without a primary key cannot be edited: there is
         // no way to say which row a change belongs to.
-        let key = if self.info.kind == ObjectKind::Table {
+        let key = if self.info.kind == ObjectKind::Table && !self.read_only(cx) {
             page.columns
                 .iter()
                 .enumerate()
@@ -1038,7 +1046,9 @@ impl TableView {
                         .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
                 )
         } else if !editable {
-            h_flex().child(if self.info.kind == ObjectKind::View {
+            h_flex().child(if self.read_only(cx) {
+                t("Read-only connection")
+            } else if self.info.kind == ObjectKind::View {
                 t("Read-only: this is a view")
             } else {
                 t("Read-only: no primary key")

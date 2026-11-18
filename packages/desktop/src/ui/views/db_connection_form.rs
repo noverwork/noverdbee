@@ -202,6 +202,7 @@ impl DbConnectionForm {
                 &common::selected(&self.environment, cx).unwrap_or_default(),
             ),
             mcp: self.mcp,
+            read_only: self.read_only,
             ..DbConnectionRecord::default()
         };
         if self.is_postgres(cx) {
@@ -220,7 +221,6 @@ impl DbConnectionForm {
             DbConnectionRecord {
                 driver: DRIVER_SQLITE.to_string(),
                 path: text(&self.path),
-                read_only: self.read_only,
                 ..shared
             }
         }
@@ -349,29 +349,19 @@ impl DbConnectionForm {
     }
 
     fn render_file(&self, cx: &Context<Self>) -> Div {
-        common::form_section("file", t("SQLite file"), None)
-            .child(common::field(
-                t("Path"),
-                h_flex()
-                    .gap_2()
-                    .child(div().flex_1().min_w_0().child(Input::new(&self.path)))
-                    .child(
-                        Button::new("browse")
-                            .outline()
-                            .label(t("Browse"))
-                            .on_click(cx.listener(|this, _, window, cx| this.browse(window, cx))),
-                    ),
-                self.errors.path.map(t),
-            ))
-            .child(
-                Switch::new("read-only")
-                    .checked(self.read_only)
-                    .label(t("Open read-only"))
-                    .on_change(cx.listener(|this, checked: &bool, _, cx| {
-                        this.read_only = *checked;
-                        cx.notify();
-                    })),
-            )
+        common::form_section("file", t("SQLite file"), None).child(common::field(
+            t("Path"),
+            h_flex()
+                .gap_2()
+                .child(div().flex_1().min_w_0().child(Input::new(&self.path)))
+                .child(
+                    Button::new("browse")
+                        .outline()
+                        .label(t("Browse"))
+                        .on_click(cx.listener(|this, _, window, cx| this.browse(window, cx))),
+                ),
+            self.errors.path.map(t),
+        ))
     }
 
     /// The group field, with the existing groups to pick from so a typo does
@@ -453,6 +443,7 @@ impl DbConnectionForm {
             ("delete", |access| &mut access.delete),
         ];
         let mut mcp = self.mcp;
+        let read_only = self.read_only;
         common::form_section(
             "plug",
             t("AI access (MCP)"),
@@ -463,7 +454,8 @@ impl DbConnectionForm {
         .child(h_flex().gap_6().children(tools.map(|(name, flag)| {
             Checkbox::new(SharedString::from(format!("mcp-{name}")))
                 .label(name)
-                .checked(*flag(&mut mcp))
+                .checked(*flag(&mut mcp) && (name == "select" || !read_only))
+                .disabled(name != "select" && read_only)
                 .on_click(cx.listener(move |this, checked: &bool, _, cx| {
                     *flag(&mut this.mcp) = *checked;
                     cx.notify();
@@ -504,7 +496,16 @@ impl Render for DbConnectionForm {
                 Select::new(&self.environment),
                 None,
             ))
-            .child(common::field(t("Group"), self.render_group(cx), None));
+            .child(common::field(t("Group"), self.render_group(cx), None))
+            .child(
+                Switch::new("read-only")
+                    .checked(self.read_only)
+                    .label(t("Read-only"))
+                    .on_change(cx.listener(|this, checked: &bool, _, cx| {
+                        this.read_only = *checked;
+                        cx.notify();
+                    })),
+            );
         let details = if self.is_postgres(cx) {
             self.render_server()
         } else {

@@ -21,10 +21,11 @@ use crate::ui::i18n::{t, tf};
 use crate::ui::icons::lucide;
 use crate::ui::store::{store, Store};
 use crate::ui::theme;
+use crate::ui::views::common;
 use crate::ui::views::result_grid::{self, GridState};
 use crate::ui::views::sql_completion::SqlCompletion;
 
-actions!(noverdbee, [SaveFile]);
+actions!(noverdbee, [SaveFile, FormatSql]);
 
 const CONTEXT: &str = "SqlEditor";
 
@@ -34,7 +35,21 @@ pub fn bind_keys(cx: &mut App) {
     } else {
         "ctrl-s"
     };
-    cx.bind_keys([KeyBinding::new(save, SaveFile, Some(CONTEXT))]);
+    cx.bind_keys([
+        KeyBinding::new(save, SaveFile, Some(CONTEXT)),
+        // Cmd+Shift+F is the editor's Replace.
+        KeyBinding::new("alt-shift-f", FormatSql, Some(CONTEXT)),
+    ]);
+}
+
+/// `sql` laid out one clause per line, keywords in capitals.
+fn format_sql(sql: &str) -> String {
+    let options = sqlformat::FormatOptions {
+        uppercase: Some(true),
+        lines_between_queries: 2,
+        ..Default::default()
+    };
+    sqlformat::format(sql, &sqlformat::QueryParams::None, &options)
 }
 
 /// How long typing pauses before the SQL is checked.
@@ -216,6 +231,24 @@ impl SqlEditor {
         });
     }
 
+    /// Formats the selection, or the whole editor when nothing is selected.
+    /// It is one edit, so Undo brings the old text back.
+    fn format(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |editor, cx| {
+            if editor.selected_range().is_empty() {
+                editor.select_all(window, cx);
+            }
+            let range = editor.selected_range();
+            let Some(sql) = editor.value().get(range).map(str::to_string) else {
+                return;
+            };
+            let formatted = format_sql(&sql);
+            if formatted != sql {
+                editor.replace(formatted, window, cx);
+            }
+        });
+    }
+
     /// Runs the selection, or the whole editor when nothing is selected.
     // ponytail: no "statement under the cursor"; that needs a SQL splitter
     // that understands strings, comments and dollar quotes.
@@ -235,6 +268,33 @@ impl SqlEditor {
         if sql.trim().is_empty() {
             return;
         }
+        let production = self
+            .store
+            .read(cx)
+            .connection(&self.connection)
+            .is_some_and(|record| record.environment == shared::Environment::Production);
+        if !production || !crate::db::sql::writes(&sql) {
+            self.start(sql, base, window, cx);
+            return;
+        }
+        let editor = cx.weak_entity();
+        common::confirm_delete(
+            t("Run on production?"),
+            t("This SQL can change data or schema on a production database."),
+            None,
+            t("Run"),
+            window,
+            cx,
+            move |window, cx| {
+                let sql = sql.clone();
+                let _ = editor.update(cx, |this, cx| this.start(sql, base, window, cx));
+            },
+        );
+    }
+
+    /// Records `sql` in the history and runs it, without the production check.
+    /// `base` is where it starts in the editor.
+    pub fn start(&mut self, sql: String, base: usize, window: &mut Window, cx: &mut Context<Self>) {
         let app = self.store.read(cx).app();
         let (connection, saved) = (self.connection.clone(), sql.clone());
         crate::app::runtime().spawn(async move {
@@ -458,6 +518,14 @@ impl SqlEditor {
             .child(action)
             .child(self.render_transaction(cx))
             .child(div().flex_1())
+            .child(
+                Button::new("format")
+                    .ghost()
+                    .small()
+                    .icon(lucide("text-align-start"))
+                    .tooltip(t("Format SQL (Alt+Shift+F)"))
+                    .on_click(cx.listener(|this, _, window, cx| this.format(window, cx))),
+            )
             .child(
                 Button::new("save-file")
                     .ghost()
@@ -748,6 +816,7 @@ impl Render for SqlEditor {
             .size_full()
             .key_context(CONTEXT)
             .on_action(cx.listener(|this, _: &SaveFile, window, cx| this.save_file(window, cx)))
+            .on_action(cx.listener(|this, _: &FormatSql, window, cx| this.format(window, cx)))
             .child(self.render_toolbar(cx))
             .child(
                 div().flex_1().min_h_0().child(
@@ -765,5 +834,18 @@ impl Render for SqlEditor {
                         .child(resizable_panel().child(self.render_results(cx))),
                 ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_sql;
+
+    #[test]
+    fn formats_clauses_and_keeps_literals() {
+        let formatted = format_sql("select a, b from t where name = 'select from'");
+        assert!(formatted.starts_with("SELECT\n"), "{formatted}");
+        assert!(formatted.contains("\nFROM\n"), "{formatted}");
+        assert!(formatted.contains("'select from'"), "{formatted}");
     }
 }

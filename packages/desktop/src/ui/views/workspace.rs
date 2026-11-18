@@ -400,6 +400,11 @@ impl Workspace {
             }
         };
         let transaction = self.store.read(cx).in_transaction(&tab.connection);
+        let read_only = self
+            .store
+            .read(cx)
+            .connection(&tab.connection)
+            .is_some_and(|record| record.read_only);
         let ids: Vec<usize> = self.tabs.iter().map(|tab| tab.id).collect();
         let index = ids.iter().position(|tab| *tab == id).unwrap_or(0);
         let others: Vec<usize> = ids.iter().copied().filter(|tab| *tab != id).collect();
@@ -463,6 +468,15 @@ impl Workspace {
                         TabView::Table(_) => tab.title.clone(),
                     }),
             )
+            .when(read_only, |tab| {
+                tab.child(
+                    div()
+                        .flex_shrink_0()
+                        .text_size(px(10.))
+                        .text_color(ink.opacity(0.7))
+                        .child("RO"),
+                )
+            })
             .when(transaction, |tab| {
                 tab.child(
                     div()
