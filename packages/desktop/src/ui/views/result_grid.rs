@@ -271,10 +271,11 @@ pub fn row_count(result: &ResultSet) -> SharedString {
 }
 
 /// `result` as CSV (RFC 4180): a header line, then one line per row. A NULL
-/// is an empty field; quotes go around a value that needs them.
+/// is an empty field; quotes go around a value that needs them, and around
+/// an empty or `NULL` text so the import reads it back as text.
 pub fn to_csv(result: &ResultSet) -> String {
     let field = |text: &str| {
-        if text.contains([',', '"', '\n', '\r']) {
+        if text.is_empty() || text == "NULL" || text.contains([',', '"', '\n', '\r']) {
             format!("\"{}\"", text.replace('"', "\"\""))
         } else {
             text.to_string()
@@ -315,6 +316,16 @@ mod tests {
             to_csv(&result),
             "id,\"note, short\"\r\n1,\"say \"\"hi\"\"\nbye\"\r\n2,\r\n"
         );
+        // The import reads back exactly what was exported.
+        let awkward = ResultSet {
+            rows: vec![
+                vec![Some(String::new()), Some("NULL".to_string())],
+                vec![None, None],
+            ],
+            ..result.clone()
+        };
+        let lines = crate::ui::views::selection::parse_csv(&to_csv(&awkward));
+        assert_eq!(lines[1..], awkward.rows);
     }
     use std::cmp::Ordering;
 

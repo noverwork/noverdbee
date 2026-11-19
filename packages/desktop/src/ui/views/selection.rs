@@ -263,9 +263,20 @@ pub fn to_text(lines: &[Vec<Value>]) -> String {
 /// otherwise. Quotes follow CSV; an unquoted `NULL` is a null.
 pub fn parse(text: &str) -> Vec<Vec<Value>> {
     let delimiter = if text.contains('\t') { '\t' } else { ',' };
+    split(text, delimiter, false)
+}
+
+/// A CSV file as lines of values. An unquoted empty field or `NULL` is a
+/// null, which reads back what the CSV export writes.
+pub fn parse_csv(text: &str) -> Vec<Vec<Value>> {
+    split(text, ',', true)
+}
+
+fn split(text: &str, delimiter: char, empty_is_null: bool) -> Vec<Vec<Value>> {
     let value = |field: &mut String, quoted: &mut bool| {
         let field = std::mem::take(field);
-        (std::mem::take(quoted) || field != "NULL").then_some(field)
+        let null = field == "NULL" || (empty_is_null && field.is_empty());
+        (std::mem::take(quoted) || !null).then_some(field)
     };
     let mut lines = Vec::new();
     let mut line = Vec::new();

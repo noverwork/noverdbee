@@ -7,6 +7,7 @@ use std::time::Duration;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::table::{
     Column, ColumnSort, DataTable, TableDelegate, TableEvent, TableState,
 };
@@ -95,6 +96,53 @@ fn statements(table: &TableRef, columns: &[String], key: &[usize], rows: &[Row])
                     &pairs(row, &mut changed.into_iter(), true),
                 ),
             }
+        })
+        .collect()
+}
+
+/// The lines of a CSV file as new rows. The first line names the columns,
+/// matched to the table's exactly or else ignoring case; columns the file
+/// leaves out get their defaults on save.
+fn imported_rows(columns: &[String], lines: &[Vec<Value>]) -> Result<Vec<Row>, SharedString> {
+    let (header, records) = lines.split_first().ok_or_else(|| t("The file is empty."))?;
+    let targets = header
+        .iter()
+        .map(|name| {
+            let name = name.as_deref().unwrap_or_default();
+            columns
+                .iter()
+                .position(|column| column == name)
+                .or_else(|| {
+                    columns
+                        .iter()
+                        .position(|column| column.eq_ignore_ascii_case(name))
+                })
+                .ok_or_else(|| tf("The table has no column {name}.", &[("name", name)]))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    records
+        .iter()
+        .enumerate()
+        .map(|(index, record)| {
+            if record.len() != targets.len() {
+                return Err(tf(
+                    "Line {line} has {count} fields; the header has {expected}.",
+                    &[
+                        ("line", &(index + 2).to_string()),
+                        ("count", &record.len().to_string()),
+                        ("expected", &targets.len().to_string()),
+                    ],
+                ));
+            }
+            Ok(Row {
+                values: Vec::new(),
+                edits: targets
+                    .iter()
+                    .copied()
+                    .zip(record.iter().cloned())
+                    .collect(),
+                state: RowState::New,
+            })
         })
         .collect()
 }
@@ -861,6 +909,68 @@ impl TableView {
         });
     }
 
+    /// Stages the rows of a CSV file the user picks as new rows, to be
+    /// reviewed and saved like any other.
+    // ponytail: the whole file is read and staged in memory, one INSERT per
+    // row on save; stream it through COPY if files of millions of rows matter.
+    fn import_csv(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.commit(cx);
+        let picked = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(t("Import")),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = picked.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let read = backend(async move {
+                tokio::fs::read_to_string(&path)
+                    .await
+                    .map_err(|error| format!("cannot read {}: {error}", path.display()))
+            })
+            .await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                let staged = read
+                    .map_err(SharedString::from)
+                    .and_then(|text| this.stage_csv(&text, cx));
+                let notification = match staged {
+                    Ok(count) => Notification::success(tf(
+                        "Staged {count} new rows. Review and save them.",
+                        &[("count", &count.to_string())],
+                    )),
+                    Err(error) => Notification::error(error),
+                };
+                window.push_notification(notification, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Stages the rows of `text` as new rows; how many, or why none were.
+    fn stage_csv(&mut self, text: &str, cx: &mut Context<Self>) -> Result<usize, SharedString> {
+        let grid = self
+            .grid
+            .clone()
+            .ok_or_else(|| t("The rows are not loaded yet."))?;
+        grid.update(cx, |grid, cx| {
+            let delegate = grid.delegate_mut();
+            let columns: Vec<String> = delegate.columns.iter().map(|c| c.name.clone()).collect();
+            let rows = imported_rows(&columns, &selection::parse_csv(text))?;
+            let (first, count) = (delegate.rows.len(), rows.len());
+            delegate.rows.extend(rows);
+            if count > 0 {
+                grid.scroll_to_row(first, cx);
+            }
+            cx.notify();
+            Ok(count)
+        })
+    }
+
     fn statements(&self, cx: &App) -> Vec<String> {
         let Some(grid) = &self.grid else {
             return Vec::new();
@@ -1066,14 +1176,28 @@ impl TableView {
                     .on_click(cx.listener(|this, _, window, cx| this.reload(window, cx))),
             )
             .when(self.mode == Mode::Data && editable, |toolbar| {
-                toolbar.child(
-                    Button::new("add-row")
-                        .ghost()
-                        .small()
-                        .icon(lucide("plus"))
-                        .label(t("Row"))
-                        .on_click(cx.listener(|this, _, _, cx| this.add_row(cx))),
-                )
+                toolbar
+                    .child(
+                        Button::new("add-row")
+                            .ghost()
+                            .small()
+                            .icon(lucide("plus"))
+                            .label(t("Row"))
+                            .on_click(cx.listener(|this, _, _, cx| this.add_row(cx))),
+                    )
+                    .child(
+                        Button::new("import-csv")
+                            .ghost()
+                            .small()
+                            .icon(lucide("file-up"))
+                            .label(t("Import CSV"))
+                            .tooltip(t(
+                                "Stage the rows of a CSV file; its first line names the columns",
+                            ))
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.import_csv(window, cx)),
+                            ),
+                    )
             })
     }
 
@@ -1287,7 +1411,7 @@ impl Render for TableView {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that would pull in GPUI's own `test` attribute.
-    use super::{save_failure, statements, Row, RowState};
+    use super::{imported_rows, save_failure, statements, Row, RowState};
     use crate::db::{Outcome, StatementResult, TableRef};
     use std::collections::HashMap;
     use std::time::Duration;
@@ -1339,6 +1463,31 @@ mod tests {
                 r#"INSERT INTO "users" DEFAULT VALUES"#,
             ]
         );
+    }
+
+    #[test]
+    fn a_csv_becomes_inserts_of_the_columns_its_header_names() {
+        let table = TableRef {
+            schema: None,
+            name: "users".to_string(),
+        };
+        let columns = ["id".to_string(), "name".to_string(), "note".to_string()];
+        let csv = "Name,note\r\nann,\r\n\"bo, jr\",\"\"\r\n";
+        let lines = crate::ui::views::selection::parse_csv(csv);
+        let rows = imported_rows(&columns, &lines).expect("rows");
+        // `id` is left out, so the database fills it in.
+        assert_eq!(
+            statements(&table, &columns, &[0], &rows),
+            [
+                r#"INSERT INTO "users" ("name", "note") VALUES ('ann', NULL)"#,
+                r#"INSERT INTO "users" ("name", "note") VALUES ('bo, jr', '')"#,
+            ]
+        );
+
+        let lines = crate::ui::views::selection::parse_csv("name,age\nann,3\n");
+        assert!(imported_rows(&columns, &lines).is_err(), "no column age");
+        let lines = crate::ui::views::selection::parse_csv("name,note\nann\n");
+        assert!(imported_rows(&columns, &lines).is_err(), "a short line");
     }
 
     #[test]
