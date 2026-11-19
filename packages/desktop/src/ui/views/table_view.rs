@@ -1152,7 +1152,7 @@ impl TableView {
 
     /// The line in place of rows that are on their way.
     fn render_loading(&self) -> AnyElement {
-        self.render_placeholder(t("Loading..."))
+        common::loading(t("Loading...")).into_any_element()
     }
 
     fn render_placeholder(&self, text: SharedString) -> AnyElement {
