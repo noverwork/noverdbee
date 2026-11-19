@@ -11,7 +11,7 @@ use lsp_types::{
     TextEdit,
 };
 
-use crate::db::sql::{in_literal, quote_ident, split_statements};
+use crate::db::sql::{literal_at, quote_ident, split_statements};
 use crate::db::{ObjectKind, TableInfo};
 
 const KEYWORDS: &[&str] = &[
@@ -156,14 +156,18 @@ fn ident(name: &str) -> String {
     }
 }
 
-fn table_suggestion(info: &TableInfo, qualified: bool) -> Suggestion {
+/// A table to offer. Inside a quoted name only its own name can go, as it
+/// is written.
+fn table_suggestion(info: &TableInfo, qualified: bool, quoted: bool) -> Suggestion {
     let table = &info.table;
     let insert = match table.schema.as_deref() {
+        _ if quoted => in_quotes(&table.name),
         Some(schema) if qualified && schema != "public" => {
             format!("{}.{}", ident(schema), ident(&table.name))
         }
         _ => ident(&table.name),
     };
+    let qualified = qualified && !quoted;
     Suggestion {
         label: if qualified {
             table.label()
@@ -196,11 +200,14 @@ fn names<'a>(text: &str, tables: &'a [TableInfo]) -> HashMap<String, &'a TableIn
         }
     }
     let word = |index: usize| words.get(index).map(|&(from, to)| &text[from..to]);
-    // Only spaces between two words: no comma, parenthesis or operator.
+    // Only spaces, or the quotes of a quoted name, between two words: no
+    // comma, parenthesis or operator.
     let adjacent = |index: usize| {
-        words
-            .get(index + 1)
-            .is_some_and(|next| text[words[index].1..next.0].trim().is_empty())
+        words.get(index + 1).is_some_and(|next| {
+            text[words[index].1..next.0]
+                .chars()
+                .all(|c| c.is_whitespace() || c == '"')
+        })
     };
 
     let mut names = HashMap::new();
@@ -249,19 +256,37 @@ fn wants_table(head: &str) -> bool {
     })
 }
 
+/// `name` as it goes between the quotes of a quoted name.
+fn in_quotes(name: &str) -> String {
+    name.replace('"', "\"\"")
+}
+
+/// The name a qualifier `head.` ends with: a word, or a quoted name.
+fn qualifier_of(head: &str) -> Option<&str> {
+    let name = match head.strip_suffix('"') {
+        Some(quoted) => &quoted[quoted.rfind('"')? + 1..],
+        None => &head[head.trim_end_matches(is_word).len()..],
+    };
+    (!name.is_empty()).then_some(name)
+}
+
 /// What to offer at byte `offset` of `text`, and where the word it replaces
 /// starts.
 fn suggest(text: &str, offset: usize, tables: &[TableInfo]) -> (usize, Vec<Suggestion>) {
     let before = text.get(..offset).unwrap_or_default();
-    let start = before.trim_end_matches(is_word).len();
+    // Inside a quoted name the word runs from the opening quote, spaces and
+    // all; strings and comments offer nothing.
+    let quote = match literal_at(text, offset) {
+        Some(open) if text.as_bytes()[open] == b'"' => Some(open),
+        Some(_) => return (offset, Vec::new()),
+        None => None,
+    };
+    let quoted = quote.is_some();
+    let start = quote.map_or_else(|| before.trim_end_matches(is_word).len(), |open| open + 1);
     let prefix = &before[start..];
-    let qualifier = before[..start]
-        .strip_suffix('.')
-        .map(|head| &head[head.trim_end_matches(is_word).len()..])
-        .filter(|qualifier| !qualifier.is_empty());
-    if in_literal(text, offset) {
-        return (start, Vec::new());
-    }
+    // What comes before the word, or before its opening quote.
+    let head = &before[..quote.unwrap_or(start)];
+    let qualifier = head.strip_suffix('.').and_then(qualifier_of);
     // Only the statement under the cursor gives tables their names.
     let statement = split_statements(text)
         .into_iter()
@@ -277,9 +302,18 @@ fn suggest(text: &str, offset: usize, tables: &[TableInfo]) -> (usize, Vec<Sugge
             {
                 out.push(Suggestion {
                     label: column.name.clone(),
-                    insert: ident(&column.name),
+                    insert: if quoted {
+                        in_quotes(&column.name)
+                    } else {
+                        ident(&column.name)
+                    },
                     kind: Kind::Column,
-                    detail: column.type_name.clone(),
+                    // Before FROM names a table, say which table it is from.
+                    detail: if names.is_empty() {
+                        format!("{} · {}", info.table.name, column.type_name)
+                    } else {
+                        column.type_name.clone()
+                    },
                 });
             }
         }
@@ -298,7 +332,7 @@ fn suggest(text: &str, offset: usize, tables: &[TableInfo]) -> (usize, Vec<Sugge
                 .as_deref()
                 .is_some_and(|schema| schema.eq_ignore_ascii_case(qualifier));
             if in_schema && starts_with_ignore_case(&info.table.name, prefix) {
-                out.push(table_suggestion(info, false));
+                out.push(table_suggestion(info, false, quoted));
             }
         }
         return (start, out);
@@ -307,16 +341,22 @@ fn suggest(text: &str, offset: usize, tables: &[TableInfo]) -> (usize, Vec<Sugge
     if prefix.is_empty() {
         return (start, out);
     }
-    if wants_table(&before[..start]) {
+    if wants_table(head) {
         for info in tables {
             if starts_with_ignore_case(&info.table.name, prefix) {
-                out.push(table_suggestion(info, true));
+                out.push(table_suggestion(info, true, quoted));
             }
         }
         return (start, out);
     }
 
-    let mut used: Vec<&TableInfo> = names.values().copied().collect();
+    // Columns of the tables the statement names; before it names any, as
+    // in `SELECT na` with FROM yet to come, those of every table.
+    let mut used: Vec<&TableInfo> = if names.is_empty() {
+        tables.iter().collect()
+    } else {
+        names.values().copied().collect()
+    };
     used.sort_by_key(|info| info.table.label());
     used.dedup_by(|a, b| a.table == b.table);
     for info in used {
@@ -324,8 +364,11 @@ fn suggest(text: &str, offset: usize, tables: &[TableInfo]) -> (usize, Vec<Sugge
     }
     for info in tables {
         if starts_with_ignore_case(&info.table.name, prefix) {
-            out.push(table_suggestion(info, true));
+            out.push(table_suggestion(info, true, quoted));
         }
+    }
+    if quoted {
+        return (start, out);
     }
     // Keywords follow the case the user types in.
     let lower = !prefix.chars().any(char::is_uppercase);
@@ -489,9 +532,26 @@ mod tests {
         assert_eq!(inserts("SELECT * FROM us|"), ["users"]);
         assert_eq!(inserts("SEL|"), ["SELECT"]);
         assert_eq!(inserts("sel|"), ["select"]);
-        // Columns of tables the text does not name are left out.
-        assert_eq!(inserts("SELECT tot|"), Vec::<String>::new());
+        // Before FROM names a table, every table's columns are offered;
+        // after, only those of the tables it names.
+        assert_eq!(inserts("SELECT tot|"), ["total"]);
+        assert_eq!(inserts("SELECT tot| FROM users"), Vec::<String>::new());
         assert_eq!(inserts("SELECT | FROM users"), Vec::<String>::new());
         assert_eq!(inserts("SELECT|"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_quoted_name_completes_inside_its_quotes() {
+        assert_eq!(inserts(r#"select "na|" from users"#), ["name"]);
+        // Before FROM, as the query is typed left to right.
+        assert_eq!(inserts(r#"select "na|"#), ["name"]);
+        // Still open, as it is while being typed.
+        assert_eq!(inserts(r#"select "na| from users"#), ["name"]);
+        // No quotes of its own and no schema inside the quotes.
+        assert_eq!(inserts(r#"SELECT * FROM "Ev|"#), ["Events"]);
+        assert_eq!(inserts(r#"SELECT u."e| FROM users u"#), ["email"]);
+        // A quoted alias, and a quoted name before the word.
+        assert_eq!(inserts(r#"SELECT "u".n| FROM users "u""#), ["name"]);
+        assert_eq!(inserts(r#"SELECT "name", em| FROM users"#), ["email"]);
     }
 }

@@ -168,10 +168,15 @@ pub fn writes(sql: &str) -> bool {
     false
 }
 
-/// Whether a cursor at byte `offset` sits inside a string, a quoted name, a
-/// comment, or a dollar-quoted body.
-pub fn in_literal(sql: &str, offset: usize) -> bool {
-    scan(sql).1.iter().any(|inside| inside.contains(&offset))
+/// Where the string, quoted name, comment, or dollar-quoted body that a
+/// cursor at byte `offset` sits inside begins: the byte of its opening quote
+/// or marker. `None` when the cursor is in SQL code.
+pub fn literal_at(sql: &str, offset: usize) -> Option<usize> {
+    scan(sql)
+        .1
+        .into_iter()
+        .find(|inside| inside.contains(&offset))
+        .map(|inside| inside.start - 1)
 }
 
 /// The statements of `sql`, and the cursor offsets that fall inside
@@ -403,7 +408,7 @@ mod tests {
             let found: Vec<bool> = marked
                 .match_indices('|')
                 .enumerate()
-                .map(|(n, (at, _))| in_literal(&sql, at - n))
+                .map(|(n, (at, _))| literal_at(&sql, at - n).is_some())
                 .collect();
             assert_eq!(found, expected, "{marked}");
         }
