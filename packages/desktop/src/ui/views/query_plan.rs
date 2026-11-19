@@ -21,6 +21,8 @@ pub struct QueryPlan {
     /// Nodes whose children are hidden, by their place in a depth-first walk.
     collapsed: HashSet<usize>,
     raw: bool,
+    /// The step that costs the most by itself, marked in the tree.
+    slowest: Option<usize>,
 }
 
 /// A visible row: the node's depth-first index, its depth, and the node.
@@ -56,9 +58,42 @@ fn number(value: Option<f64>) -> SharedString {
     }
 }
 
+/// What a step costs by itself, without the steps under it: its own time
+/// when the plan was analyzed, else its own estimated cost. `None` when the
+/// database gave neither, as SQLite does.
+fn own_weight(node: &PlanNode) -> Option<f64> {
+    let total = |node: &PlanNode| match node.actual_time {
+        // The time is per loop.
+        Some(time) => Some(time * node.loops.unwrap_or(1.)),
+        None => node.total_cost,
+    };
+    let children: f64 = node.children.iter().filter_map(total).sum();
+    total(node).map(|own| (own - children).max(0.))
+}
+
+/// The depth-first index of the step that weighs the most by itself.
+fn slowest(roots: &[PlanNode]) -> Option<usize> {
+    fn walk(nodes: &[PlanNode], next: &mut usize, best: &mut Option<(usize, f64)>) {
+        for node in nodes {
+            let index = *next;
+            *next += 1;
+            if let Some(weight) = own_weight(node) {
+                if best.is_none_or(|(_, most)| weight > most) {
+                    *best = Some((index, weight));
+                }
+            }
+            walk(&node.children, next, best);
+        }
+    }
+    let mut best = None;
+    walk(roots, &mut 0, &mut best);
+    best.map(|(index, _)| index)
+}
+
 impl QueryPlan {
     pub fn new(plan: Plan) -> Self {
         Self {
+            slowest: slowest(&plan.roots),
             plan,
             collapsed: HashSet::new(),
             raw: false,
@@ -219,9 +254,13 @@ impl QueryPlan {
                     number(node.loops),
                 ]);
             }
+            let heavy = self.slowest == Some(index);
             line()
                 .text_size(px(12.))
                 .text_color(theme::STENCIL_DIM)
+                .when(heavy, |row| {
+                    row.bg(theme::mix(theme::AMBER, theme::PORT, 0.18))
+                })
                 .child(
                     h_flex()
                         .flex_1()
@@ -233,7 +272,11 @@ impl QueryPlan {
                             div()
                                 .min_w_0()
                                 .truncate()
-                                .text_color(theme::STENCIL)
+                                .text_color(if heavy {
+                                    theme::AMBER_TEXT
+                                } else {
+                                    theme::STENCIL
+                                })
                                 .child(node.operation.clone()),
                         ),
                 )
@@ -285,7 +328,7 @@ impl Render for QueryPlan {
 mod tests {
     use std::collections::HashSet;
 
-    use super::visible;
+    use super::{slowest, visible};
     use crate::db::plan::PlanNode;
 
     fn node(name: &str, children: Vec<PlanNode>) -> PlanNode {
@@ -323,5 +366,32 @@ mod tests {
                 (4, 0, "next")
             ]
         );
+    }
+
+    #[test]
+    fn the_slowest_step_is_the_one_heaviest_by_itself_across_its_loops() {
+        let timed = |time: f64, loops: f64, children| PlanNode {
+            actual_time: Some(time),
+            loops: Some(loops),
+            ..node("", children)
+        };
+        // The join's 10 ms are mostly its children: 2 ms, and 0.5 ms × 12 loops.
+        let roots = vec![timed(
+            10.,
+            1.,
+            vec![timed(2., 1., vec![]), timed(0.5, 12., vec![])],
+        )];
+        assert_eq!(slowest(&roots), Some(2));
+
+        // Without timings, the estimated cost decides.
+        let costed = |cost: f64, children| PlanNode {
+            total_cost: Some(cost),
+            ..node("", children)
+        };
+        let roots = vec![costed(100., vec![costed(30., vec![])])];
+        assert_eq!(slowest(&roots), Some(0));
+
+        // SQLite gives neither.
+        assert_eq!(slowest(&[node("SCAN t", vec![])]), None);
     }
 }
