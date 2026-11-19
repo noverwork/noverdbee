@@ -6,7 +6,9 @@ use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
 use gpui_kit::component::highlighter::Diagnostic;
-use gpui_kit::component::input::{Editor, EditorState, InputEvent, RopeExt as _};
+use gpui_kit::component::input::{
+    Editor, EditorState, Enter, IndentInline, InputEvent, RopeExt as _,
+};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::notification::Notification;
@@ -1007,6 +1009,20 @@ impl Render for SqlEditor {
             .key_context(CONTEXT)
             .on_action(cx.listener(|this, _: &SaveFile, window, cx| this.save_file(window, cx)))
             .on_action(cx.listener(|this, _: &FormatSql, window, cx| this.format(window, cx)))
+            // Tab takes the picked completion, as Enter does, instead of
+            // indenting while the menu is open.
+            .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
+                if this.editor.read(cx).completion_menu_state().open {
+                    cx.stop_propagation();
+                    window.dispatch_action(
+                        Box::new(Enter {
+                            secondary: false,
+                            shift: false,
+                        }),
+                        cx,
+                    );
+                }
+            }))
             .child(self.render_toolbar(cx))
             .child(
                 div().flex_1().min_h_0().child(
