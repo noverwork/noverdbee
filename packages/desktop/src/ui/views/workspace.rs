@@ -6,7 +6,6 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::resizable::{h_resizable, resizable_panel};
-use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{h_flex, v_flex, Disableable as _, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -664,16 +663,8 @@ impl Workspace {
             .map(|record| SharedString::from(record.name.clone()))
             .unwrap_or_default();
         let (navigator, id) = (self.navigator.clone(), id.to_string());
-        v_flex()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .gap_4()
+        common::loading(t("Connecting"))
             .bg(theme::PORT)
-            .text_sm()
-            .text_color(theme::STENCIL_MUTE)
-            .child(Spinner::new().large().color(theme::STENCIL.into()))
-            .child(t("Connecting"))
             .child(name)
             .child(
                 Button::new("cancel-connect")

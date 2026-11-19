@@ -5,6 +5,7 @@ use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::{ContextMenu, ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::select::{SelectItem, SelectState};
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
     h_flex, v_flex, Disableable as _, IndexPath, Sizable as _, WindowExt as _,
 };
@@ -193,6 +194,20 @@ pub fn error_banner(error: SharedString) -> Div {
         .text_sm()
         .text_color(theme::RED_TEXT)
         .child(error)
+}
+
+/// The one loading state of the app: the spinner over a line that names the
+/// wait, centred in whatever it fills.
+pub fn loading(label: SharedString) -> Div {
+    v_flex()
+        .size_full()
+        .items_center()
+        .justify_center()
+        .gap_4()
+        .text_sm()
+        .text_color(theme::STENCIL_MUTE)
+        .child(Spinner::new().large().color(theme::STENCIL.into()))
+        .child(label)
 }
 
 /// The dashed box shown when a list has nothing in it.

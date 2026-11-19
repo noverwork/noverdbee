@@ -1,9 +1,8 @@
 //! The window: sidebar, page header, and the current page.
 
 use gpui_kit::component::button::Button;
-use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{h_flex, v_flex, Sizable as _, WindowExt as _};
+use gpui_kit::component::{h_flex, v_flex, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -351,15 +350,8 @@ impl Render for Shell {
             (store.loading, store.load_error.clone(), store.route.clone())
         };
         if loading {
-            return centered()
-                .gap_4()
-                .child(Spinner::new().large().color(theme::STENCIL.into()))
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(theme::STENCIL_MUTE)
-                        .child(t("Loading...")),
-                )
+            return views::common::loading(t("Loading..."))
+                .bg(theme::PORT)
                 .into_any_element();
         }
         if let Some(error) = load_error {
