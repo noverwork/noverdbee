@@ -528,6 +528,8 @@ pub struct TableView {
     order: Option<(usize, Direction)>,
     loading: bool,
     saving: bool,
+    /// Whether the whole table is being read for a CSV export.
+    exporting: bool,
     /// Whether the connection was read-only when the grid was built.
     read_only: bool,
     /// When the rows shown were loaded, as `14:02:31`; proof that a reload ran
@@ -595,6 +597,7 @@ impl TableView {
             order: None,
             loading: false,
             saving: false,
+            exporting: false,
             read_only: false,
             loaded_at: None,
             structure_loading: false,
@@ -971,6 +974,69 @@ impl TableView {
         })
     }
 
+    /// Saves every row of the table that the WHERE filter keeps, in the order
+    /// shown, as a CSV file the user names. Staged changes are not in it: it
+    /// is what the database holds.
+    // ponytail: the whole table is held in memory before it is written;
+    // stream pages to the file if tables far beyond memory need exporting.
+    fn export_csv(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.exporting {
+            return;
+        }
+        let Some(record) = self.store.read(cx).connection(&self.connection).cloned() else {
+            return;
+        };
+        let app = self.store.read(cx).app();
+        let table = self.info.table.clone();
+        let filter = self.filter.read(cx).value().to_string();
+        // Pages need a fixed order to neither skip nor repeat rows: the one
+        // shown, else the primary key.
+        let order = self
+            .order
+            .and_then(|(index, direction)| Some((self.info.columns.get(index)?, direction)))
+            .or_else(|| {
+                let key = self.info.columns.iter().find(|column| column.primary_key)?;
+                Some((key, Direction::Ascending))
+            })
+            .map(|(column, direction)| (column.name.clone(), direction));
+        let folder = dirs::download_dir().unwrap_or_default();
+        let picked = cx.prompt_for_new_path(&folder, Some(&format!("{}.csv", table.name)));
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(path))) = picked.await else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.exporting = true;
+                cx.notify();
+            });
+            let written = backend(async move {
+                let session = app.state::<SessionManager>().connect(&record).await?;
+                let order = order
+                    .as_ref()
+                    .map(|(name, direction)| (name.as_str(), *direction));
+                let all = session.read_all(&table, &filter, order).await?;
+                tokio::fs::write(&path, result_grid::to_csv(&all))
+                    .await
+                    .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+                Ok::<_, String>(all.rows.len())
+            })
+            .await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.exporting = false;
+                let notification = match written {
+                    Ok(rows) => Notification::success(tf(
+                        "Saved {rows} rows.",
+                        &[("rows", &rows.to_string())],
+                    )),
+                    Err(error) => Notification::error(error),
+                };
+                window.push_notification(notification, cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn statements(&self, cx: &App) -> Vec<String> {
         let Some(grid) = &self.grid else {
             return Vec::new();
@@ -1175,6 +1241,18 @@ impl TableView {
                     .loading(self.loading || self.structure_loading)
                     .on_click(cx.listener(|this, _, window, cx| this.reload(window, cx))),
             )
+            .when(self.mode == Mode::Data, |toolbar| {
+                toolbar.child(
+                    Button::new("export-table-csv")
+                        .ghost()
+                        .small()
+                        .icon(lucide("file-down"))
+                        .label(t("Export CSV"))
+                        .tooltip(t("Save every row the filter keeps, in the order shown"))
+                        .loading(self.exporting)
+                        .on_click(cx.listener(|this, _, window, cx| this.export_csv(window, cx))),
+                )
+            })
             .when(self.mode == Mode::Data && editable, |toolbar| {
                 toolbar
                     .child(

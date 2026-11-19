@@ -589,6 +589,41 @@ async fn postgres_a_failed_save_keeps_the_open_transaction() {
 }
 
 #[tokio::test]
+async fn read_all_reads_past_the_row_limit_with_the_filter_and_order() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let session = Session::open(&record(&directory, false))
+        .await
+        .expect("open");
+    // 12,001 rows: more than one page and more than ROW_LIMIT.
+    session
+        .run(
+            "CREATE TABLE n (id INTEGER PRIMARY KEY);
+             WITH RECURSIVE s(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM s WHERE i < 24001)
+             INSERT INTO n SELECT i FROM s WHERE i % 2 = 0"
+                .to_string(),
+        )
+        .await;
+    let table = TableRef {
+        schema: None,
+        name: "n".to_string(),
+    };
+    let all = session
+        .read_all(&table, "", Some(("id", Direction::Descending)))
+        .await
+        .expect("rows");
+    assert_eq!(all.rows.len(), 12_001);
+    assert_eq!(all.rows[0], cells(&[Some("24000")]));
+    assert_eq!(all.rows[12_000], cells(&[Some("0")]));
+    assert!(!all.truncated);
+
+    let kept = session
+        .read_all(&table, "id < 10", Some(("id", Direction::Ascending)))
+        .await
+        .expect("rows");
+    assert_eq!(kept.rows.len(), 5);
+}
+
+#[tokio::test]
 async fn sqlite_explains_each_statement_without_running_it() {
     let directory = tempfile::tempdir().expect("temp dir");
     let session = Session::open(&record(&directory, false))

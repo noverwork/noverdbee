@@ -189,6 +189,33 @@ impl Session {
             Session::Postgres(session) => session.cancel(),
         }
     }
+
+    /// Every row of `table` that `filter` keeps, read a page at a time so no
+    /// read is cut short at [`ROW_LIMIT`]. `order` should be unique, or rows
+    /// may land on two pages or none.
+    pub async fn read_all(
+        &self,
+        table: &TableRef,
+        filter: &str,
+        order: Option<(&str, sql::Direction)>,
+    ) -> Result<ResultSet, String> {
+        const CHUNK: usize = 5_000;
+        let mut all = ResultSet::default();
+        loop {
+            let query = sql::page_query(table, filter, order, CHUNK, all.rows.len());
+            let page = match self.run(query).await.pop().map(|last| last.outcome) {
+                Some(Outcome::Rows(page)) => page,
+                Some(Outcome::Error { message, .. }) => return Err(message),
+                _ => return Err("the table returned no rows".to_string()),
+            };
+            let done = page.rows.len() < CHUNK;
+            all.columns = page.columns;
+            all.rows.extend(page.rows);
+            if done {
+                return Ok(all);
+            }
+        }
+    }
 }
 
 /// The open sessions, by saved connection id.

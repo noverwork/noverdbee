@@ -154,6 +154,7 @@
  "Roll back": "Rollback",
  "Export CSV": "匯出 CSV",
  "Import CSV": "匯入 CSV",
+ "Save every row the filter keeps, in the order shown": "存下篩選條件保留的所有資料列，依目前的排序",
  "Stage the rows of a CSV file; its first line names the columns": "把 CSV 檔的資料列加入待儲存變更；第一行要是欄位名稱",
  "Staged {count} new rows. Review and save them.": "已加入 {count} 筆新資料列，檢查後再儲存。",
  "The file is empty.": "檔案是空的。",
