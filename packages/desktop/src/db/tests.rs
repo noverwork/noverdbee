@@ -589,6 +589,73 @@ async fn postgres_a_failed_save_keeps_the_open_transaction() {
 }
 
 #[tokio::test]
+async fn sqlite_explains_each_statement_without_running_it() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let session = Session::open(&record(&directory, false))
+        .await
+        .expect("open");
+    session
+        .run("CREATE TABLE t (id INTEGER PRIMARY KEY, a INTEGER)".to_string())
+        .await;
+    let plans = super::plan::explain(
+        &session,
+        "SELECT * FROM t WHERE a = 1; DELETE FROM t",
+        false,
+    )
+    .await;
+    let plans: Vec<_> = plans.into_iter().map(|plan| plan.expect("plan")).collect();
+    assert_eq!(plans.len(), 2);
+    assert_eq!(plans[0].sql, "SELECT * FROM t WHERE a = 1");
+    assert!(
+        plans[0].roots[0].operation.starts_with("SCAN t"),
+        "{:?}",
+        plans[0].roots
+    );
+}
+
+/// Needs a server, as above. Explain Analyze runs the SQL but never keeps its
+/// writes, whether or not the user has a transaction open.
+#[tokio::test]
+async fn postgres_explain_analyze_rolls_back_its_writes() {
+    let Ok(url) = std::env::var("NOVERDBEE_TEST_PG_URL") else {
+        eprintln!("skipped: NOVERDBEE_TEST_PG_URL is not set");
+        return;
+    };
+    let session = Session::open(&pg_record(&url)).await.expect("connect");
+    let table = format!("noverdbee_explain_{}", std::process::id());
+    session.run(format!("CREATE TABLE {table} (id int)")).await;
+    let count = |session: &Session| {
+        let sql = format!("SELECT count(*) FROM {table}");
+        let session = session.clone();
+        async move { rows(&session, &sql).await.rows }
+    };
+
+    let plans =
+        super::plan::explain(&session, &format!("INSERT INTO {table} VALUES (1)"), true).await;
+    let plan = plans[0].as_ref().expect("plan");
+    assert!(plan.execution_ms.is_some());
+    assert_eq!(plan.roots[0].operation, format!("Insert on {table}"));
+    assert_eq!(plan.roots[0].children[0].actual_rows, Some(1.));
+    assert!(!session.in_transaction().await);
+    assert_eq!(count(&session).await, [cells(&[Some("0")])]);
+
+    // A failure inside the block still ends it.
+    let plans = super::plan::explain(&session, "SELECT 1 / 0", true).await;
+    assert!(plans[0].is_err());
+    assert!(!session.in_transaction().await);
+
+    // In the user's transaction, only the explained write goes.
+    session
+        .run(format!("BEGIN; INSERT INTO {table} VALUES (7)"))
+        .await;
+    super::plan::explain(&session, &format!("DELETE FROM {table}"), true).await;
+    assert!(session.in_transaction().await);
+    assert_eq!(count(&session).await, [cells(&[Some("1")])]);
+    session.run("ROLLBACK".to_string()).await;
+    session.run(format!("DROP TABLE {table}")).await;
+}
+
+#[tokio::test]
 async fn postgres_a_read_only_connection_refuses_writes() {
     let Ok(url) = std::env::var("NOVERDBEE_TEST_PG_URL") else {
         eprintln!("skipped: NOVERDBEE_TEST_PG_URL is not set");

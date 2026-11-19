@@ -4,16 +4,19 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
 use gpui_kit::component::highlighter::Diagnostic;
 use gpui_kit::component::input::{Editor, EditorState, InputEvent, RopeExt as _};
 use gpui_kit::component::list::ListItem;
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::resizable::{resizable_panel, v_resizable};
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex, Disableable as _, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::db::plan::Plan;
 use crate::db::{Outcome, SessionManager, StatementResult};
 use crate::store::history::HistoryEntry;
 use crate::ui::bridge::backend;
@@ -22,6 +25,7 @@ use crate::ui::icons::lucide;
 use crate::ui::store::{store, Store};
 use crate::ui::theme;
 use crate::ui::views::common;
+use crate::ui::views::query_plan::QueryPlan;
 use crate::ui::views::result_grid::{self, GridState};
 use crate::ui::views::sql_completion::SqlCompletion;
 
@@ -55,10 +59,34 @@ fn format_sql(sql: &str) -> String {
 /// How long typing pauses before the SQL is checked.
 const CHECK_DELAY: Duration = Duration::from_millis(500);
 
+/// What a result tab shows.
+enum ResultBody {
+    Grid(Entity<GridState>),
+    Plan(Entity<QueryPlan>),
+}
+
 struct ResultTab {
-    grid: Entity<GridState>,
+    body: ResultBody,
+    /// `RESULT 1`, `PLAN 1`
+    label: SharedString,
     /// `120 rows · 34 ms`
     summary: SharedString,
+}
+
+/// What a run sends to the database.
+enum Job {
+    Run(String),
+    /// `EXPLAIN` each statement; `analyze` runs them and rolls back.
+    Explain {
+        sql: String,
+        analyze: bool,
+    },
+}
+
+/// What came back from a [`Job`].
+enum Ran {
+    Results(Vec<StatementResult>),
+    Plans(Vec<Result<Plan, String>>),
 }
 
 struct Message {
@@ -249,6 +277,55 @@ impl SqlEditor {
         });
     }
 
+    /// The selection, or the whole editor when nothing is selected, and where
+    /// it starts in the editor.
+    fn target(&self, cx: &App) -> Option<(String, usize)> {
+        let editor = self.editor.read(cx);
+        let text = editor.value();
+        let range = editor.selected_range();
+        let (sql, base) = match text.get(range.clone()) {
+            Some(selected) if !range.is_empty() => (selected.to_string(), range.start),
+            _ => (text.to_string(), 0),
+        };
+        (!sql.trim().is_empty()).then_some((sql, base))
+    }
+
+    /// Shows the plan of the selection, or of everything. `analyze` runs the
+    /// SQL for real timings, then rolls it back.
+    pub fn explain(&mut self, analyze: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.running {
+            return;
+        }
+        let Some((sql, _)) = self.target(cx) else {
+            return;
+        };
+        let production = self
+            .store
+            .read(cx)
+            .connection(&self.connection)
+            .is_some_and(|record| record.environment == shared::Environment::Production);
+        if !analyze || !production || !crate::db::sql::writes(&sql) {
+            self.execute(Job::Explain { sql, analyze }, 0, window, cx);
+            return;
+        }
+        let editor = cx.weak_entity();
+        common::confirm_delete(
+            t("Run on production?"),
+            t("Explain Analyze runs this SQL on a production database, then rolls it back. Sequences and outside effects are not rolled back."),
+            None,
+            t("Run"),
+            window,
+            cx,
+            move |window, cx| {
+                let job = Job::Explain {
+                    sql: sql.clone(),
+                    analyze: true,
+                };
+                let _ = editor.update(cx, |this, cx| this.execute(job, 0, window, cx));
+            },
+        );
+    }
+
     /// Runs the selection, or the whole editor when nothing is selected.
     // ponytail: no "statement under the cursor"; that needs a SQL splitter
     // that understands strings, comments and dollar quotes.
@@ -256,18 +333,9 @@ impl SqlEditor {
         if self.running {
             return;
         }
-        let (sql, base) = {
-            let editor = self.editor.read(cx);
-            let text = editor.value();
-            let range = editor.selected_range();
-            match text.get(range.clone()) {
-                Some(selected) if !range.is_empty() => (selected.to_string(), range.start),
-                _ => (text.to_string(), 0),
-            }
-        };
-        if sql.trim().is_empty() {
+        let Some((sql, base)) = self.target(cx) else {
             return;
-        }
+        };
         let production = self
             .store
             .read(cx)
@@ -304,12 +372,12 @@ impl SqlEditor {
                 tracing::warn!(error, "Failed to save query history");
             }
         });
-        self.execute(sql, base, window, cx);
+        self.execute(Job::Run(sql), base, window, cx);
     }
 
-    /// Runs `sql` and shows what came back. `base` is where it starts in the
-    /// editor, for placing the error marker.
-    fn execute(&mut self, sql: String, base: usize, window: &mut Window, cx: &mut Context<Self>) {
+    /// Runs `job` and shows what came back. `base` is where its SQL starts in
+    /// the editor, for placing the error marker.
+    fn execute(&mut self, job: Job, base: usize, window: &mut Window, cx: &mut Context<Self>) {
         if self.running {
             return;
         }
@@ -324,15 +392,23 @@ impl SqlEditor {
                 let sessions = app.state::<SessionManager>();
                 let dropped = sessions.get(&record.id).is_some_and(|open| open.is_closed());
                 let session = sessions.connect(&record).await?;
-                let results = session.run(sql).await;
-                Ok::<_, String>((dropped, results, session.in_transaction().await))
+                let ran = match job {
+                    Job::Run(sql) => Ran::Results(session.run(sql).await),
+                    Job::Explain { sql, analyze } => {
+                        Ran::Plans(crate::db::plan::explain(&session, &sql, analyze).await)
+                    }
+                };
+                Ok::<_, String>((dropped, ran, session.in_transaction().await))
             })
             .await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.running = false;
                 match ran {
-                    Ok((dropped, results, open)) => {
-                        this.show(results, base, window, cx);
+                    Ok((dropped, ran, open)) => {
+                        match ran {
+                            Ran::Results(results) => this.show(results, base, window, cx),
+                            Ran::Plans(plans) => this.show_plans(plans, cx),
+                        }
                         if dropped {
                             this.messages.insert(
                                 0,
@@ -410,7 +486,11 @@ impl SqlEditor {
                         &[("count", &count), ("elapsed", &elapsed)],
                     );
                     self.results.push(ResultTab {
-                        grid: result_grid::new_grid(rows, window, cx),
+                        body: ResultBody::Grid(result_grid::new_grid(rows, window, cx)),
+                        label: tf(
+                            "RESULT {number}",
+                            &[("number", &(self.results.len() + 1).to_string())],
+                        ),
                         summary: summary.clone(),
                     });
                     (summary, false)
@@ -441,6 +521,45 @@ impl SqlEditor {
         };
 
         self.mark(error.and_then(|(message, at)| Some((message, at?))), cx);
+    }
+
+    /// Replaces what is shown with one plan tab per statement; failures go to
+    /// Messages.
+    fn show_plans(&mut self, plans: Vec<Result<Plan, String>>, cx: &mut Context<Self>) {
+        self.results.clear();
+        self.messages.clear();
+        for plan in plans {
+            let message = match plan {
+                Ok(plan) => {
+                    let sql = first_line(&plan.sql);
+                    let plan = QueryPlan::new(plan);
+                    let summary = plan.summary();
+                    self.results.push(ResultTab {
+                        body: ResultBody::Plan(cx.new(|_| plan)),
+                        label: tf(
+                            "PLAN {number}",
+                            &[("number", &(self.results.len() + 1).to_string())],
+                        ),
+                        summary: summary.clone(),
+                    });
+                    Message {
+                        sql,
+                        text: summary,
+                        failed: false,
+                    }
+                }
+                Err(message) => Message {
+                    sql: SharedString::default(),
+                    text: message.into(),
+                    failed: true,
+                },
+            };
+            self.messages.push(message);
+        }
+        let failed = self.messages.iter().any(|message| message.failed);
+        self.active = if failed { self.results.len() } else { 0 };
+        // A marker from an earlier run points at text the plan says nothing about.
+        self.mark(None, cx);
     }
 
     /// Has the database parse the SQL once typing pauses, and marks what it
@@ -526,6 +645,7 @@ impl SqlEditor {
                     .tooltip(t("Format SQL (Alt+Shift+F)"))
                     .on_click(cx.listener(|this, _, window, cx| this.format(window, cx))),
             )
+            .child(self.render_explain(cx))
             .child(
                 Button::new("save-file")
                     .ghost()
@@ -544,6 +664,58 @@ impl SqlEditor {
             )
     }
 
+    /// Explain Plan, with Explain Analyze beside it on PostgreSQL, like
+    /// DataGrip's Explain Plan menu.
+    fn render_explain(&self, cx: &Context<Self>) -> impl IntoElement {
+        let postgres = self
+            .store
+            .read(cx)
+            .connection(&self.connection)
+            .is_some_and(|record| record.driver == crate::db::DRIVER_POSTGRES);
+        let editor = cx.weak_entity();
+        DropdownButton::new("explain")
+            .ghost()
+            .small()
+            .disabled(self.running)
+            .button(
+                Button::new("explain-plan")
+                    .icon(lucide("list-tree"))
+                    .label(t("Explain Plan"))
+                    .tooltip(t("Show the query plan without running it"))
+                    .on_click(cx.listener(|this, _, window, cx| this.explain(false, window, cx))),
+            )
+            .dropdown_menu(move |menu, _, _| {
+                let item = |label: &'static str, tip: SharedString, analyze: bool| {
+                    let editor = editor.clone();
+                    PopupMenuItem::element(move |_, _| {
+                        let tip = tip.clone();
+                        div()
+                            .id(label)
+                            .w_full()
+                            .child(t(label))
+                            .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                    })
+                    .on_click(move |_, window, cx| {
+                        let _ = editor.update(cx, |this, cx| this.explain(analyze, window, cx));
+                    })
+                };
+                let menu = menu.item(item(
+                    "Explain Plan",
+                    t("Show the query plan without running it"),
+                    false,
+                ));
+                if postgres {
+                    menu.item(item(
+                        "Explain Analyze",
+                        t("Runs the SQL for real timings, then rolls it back"),
+                        true,
+                    ))
+                } else {
+                    menu
+                }
+            })
+    }
+
     /// Begin, or the open transaction with Commit and Rollback. A transaction
     /// belongs to the connection, so every tab on it shows the same one.
     fn render_transaction(&self, cx: &Context<Self>) -> impl IntoElement {
@@ -554,7 +726,7 @@ impl SqlEditor {
                 .label(label)
                 .disabled(self.running)
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.execute(sql.to_string(), 0, window, cx)
+                    this.execute(Job::Run(sql.to_string()), 0, window, cx)
                 }))
         };
         if !self.store.read(cx).in_transaction(&self.connection) {
@@ -606,32 +778,47 @@ impl SqlEditor {
             .bg(theme::RAIL)
             .border_b_1()
             .border_color(theme::RIB)
-            .children((0..self.results.len()).map(|index| {
-                tab(
-                    index,
-                    tf("RESULT {number}", &[("number", &(index + 1).to_string())]),
-                )
-            }))
+            .children(
+                self.results
+                    .iter()
+                    .enumerate()
+                    .map(|(index, result)| tab(index, result.label.clone())),
+            )
             .child(tab(self.results.len(), t("MESSAGES")))
             .child(div().flex_1())
-            .when(self.active < self.results.len(), |bar| {
-                bar.child(
-                    Button::new("export-csv")
-                        .ghost()
-                        .xsmall()
-                        .icon(lucide("file-down"))
-                        .label(t("Export CSV"))
-                        .on_click(cx.listener(|this, _, window, cx| this.export_csv(window, cx))),
-                )
-            })
+            .when(
+                matches!(
+                    self.results.get(self.active),
+                    Some(ResultTab {
+                        body: ResultBody::Grid(_),
+                        ..
+                    })
+                ),
+                |bar| {
+                    bar.child(
+                        Button::new("export-csv")
+                            .ghost()
+                            .xsmall()
+                            .icon(lucide("file-down"))
+                            .label(t("Export CSV"))
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.export_csv(window, cx)),
+                            ),
+                    )
+                },
+            )
     }
 
     /// Saves the result shown as a CSV file the user names.
     fn export_csv(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(result) = self.results.get(self.active) else {
+        let Some(ResultTab {
+            body: ResultBody::Grid(grid),
+            ..
+        }) = self.results.get(self.active)
+        else {
             return;
         };
-        let result = result.grid.read(cx).delegate().result();
+        let result = grid.read(cx).delegate().result();
         let (csv, rows, truncated) = (
             result_grid::to_csv(result),
             result.rows.len().to_string(),
@@ -721,7 +908,10 @@ impl SqlEditor {
                 })
                 .into_any_element()
         } else if let Some(result) = self.results.get(self.active) {
-            result_grid::grid(&result.grid).into_any_element()
+            match &result.body {
+                ResultBody::Grid(grid) => result_grid::grid(grid).into_any_element(),
+                ResultBody::Plan(plan) => plan.clone().into_any_element(),
+            }
         } else {
             self.render_messages().into_any_element()
         };

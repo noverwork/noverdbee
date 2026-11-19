@@ -1,6 +1,7 @@
 //! Sessions against the databases the user manages. The app's own data lives
 //! in `crate::store`, not here.
 
+pub mod plan;
 mod postgres;
 pub mod sql;
 mod sqlite;

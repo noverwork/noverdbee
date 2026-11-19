@@ -336,6 +336,30 @@ mod shots {
             }
         }
 
+        // The plan of the join, as a tree.
+        stage
+            .cx
+            .update_window(stage.window, |_, window, cx| {
+                let shell = gpui_kit::base::Root::read(window, cx)
+                    .view()
+                    .clone()
+                    .downcast::<ui::shell::Shell>()
+                    .expect("the window shows the shell");
+                let workspace = shell.read(cx).workspace().expect("the workspace is open");
+                let editor = workspace.read(cx).active_editor().expect("an editor is open");
+                editor.update(cx, |editor, cx| {
+                    editor.set_text(
+                        "SELECT c.name, o.total\nFROM orders o\nJOIN customers c ON c.id = o.customer_id\nWHERE o.total > (SELECT avg(total) FROM orders);",
+                        window,
+                        cx,
+                    );
+                    editor.explain(false, window, cx);
+                });
+            })
+            .ok();
+        stage.settle(Duration::from_millis(500));
+        stage.shoot("editor-plan");
+
         // A table tab: its rows, then staged edits, then its structure.
         let workspace = |window: &gpui_kit::Window, cx: &gpui_kit::App| {
             gpui_kit::base::Root::read(window, cx)

@@ -5,6 +5,7 @@ pub mod db_connection_form;
 pub mod kubeconfigs;
 pub mod mcp;
 pub mod navigator;
+pub mod query_plan;
 pub mod result_grid;
 pub mod selection;
 pub mod settings;
