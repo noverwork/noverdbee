@@ -1002,8 +1002,19 @@ impl Focusable for SqlEditor {
     }
 }
 
+/// Settings key for the editor's share of the SQL editor height.
+const SPLIT_SETTING: &str = "noverdbee.sql-editor.split";
+
 impl Render for SqlEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Editor share of the height, as last dragged; a third by default.
+        let split = self
+            .store
+            .read(cx)
+            .setting(SPLIT_SETTING)
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|ratio| (0.05..=0.95).contains(ratio))
+            .unwrap_or(1. / 3.);
         v_flex()
             .size_full()
             .key_context(CONTEXT)
@@ -1027,8 +1038,28 @@ impl Render for SqlEditor {
             .child(
                 div().flex_1().min_h_0().child(
                     v_resizable("sql-editor")
+                        .on_resize({
+                            let store = self.store.clone();
+                            move |state, _, cx| {
+                                let state = state.read(cx);
+                                let (Some(editor), total) =
+                                    (state.sizes().first(), state.container_size())
+                                else {
+                                    return;
+                                };
+                                if total <= px(0.) {
+                                    return;
+                                }
+                                let ratio = (*editor / total).to_string();
+                                store.update(cx, |store, cx| {
+                                    store.set_setting(SPLIT_SETTING, ratio, cx)
+                                });
+                            }
+                        })
                         .child(
-                            resizable_panel().child(
+                            // Both panels are `size_full`, so bases summing to 100%
+                            // pin the first frame; dragging hands control to the state.
+                            resizable_panel().flex_basis(relative(split)).child(
                                 div().size_full().bg(theme::INK).child(
                                     Editor::new(&self.editor)
                                         .h_full()
@@ -1037,7 +1068,11 @@ impl Render for SqlEditor {
                                 ),
                             ),
                         )
-                        .child(resizable_panel().child(self.render_results(cx))),
+                        .child(
+                            resizable_panel()
+                                .flex_basis(relative(1. - split))
+                                .child(self.render_results(cx)),
+                        ),
                 ),
             )
     }
