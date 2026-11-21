@@ -2,10 +2,13 @@
 //! are staged in the grid and written only when the user saves them.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{
+    Editor, EditorState, Input, InputEvent, InputState, RopeExt as _,
+};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::table::{
@@ -28,6 +31,7 @@ use crate::ui::theme;
 use crate::ui::views::common;
 use crate::ui::views::result_grid::{self, GridState};
 use crate::ui::views::selection::{self, CopyCells, PasteCells, Selectable, Selection};
+use crate::ui::views::sql_completion::SqlCompletion;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RowState {
@@ -523,7 +527,7 @@ pub struct TableView {
     connection: String,
     info: TableInfo,
     mode: Mode,
-    filter: Entity<InputState>,
+    filter: Entity<EditorState>,
     grid: Option<Entity<TableState<EditGrid>>>,
     order: Option<(usize, Direction)>,
     loading: bool,
@@ -566,17 +570,31 @@ impl TableView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let filter =
-            cx.new(|cx| InputState::new(window, cx).placeholder(t("condition, e.g. id > 100")));
+        let filter = cx.new(|cx| {
+            EditorState::new(window, cx)
+                .language("sql")
+                .line_number(false)
+                .folding(false)
+                .submit_on_enter(true)
+                .placeholder(t("condition, e.g. id > 100"))
+        });
+        // The condition is about this table alone, so only its columns are offered.
+        let completion = Rc::new(SqlCompletion::default());
+        *completion.tables.borrow_mut() = vec![info.clone()];
+        filter.update(cx, |filter, _| {
+            filter.lsp_mut().completion_provider = Some(completion);
+        });
         let store = store(cx);
         let _subscriptions = vec![
             cx.subscribe_in(
                 &filter,
                 window,
-                |this, _, event: &InputEvent, window, cx| {
-                    if matches!(event, InputEvent::PressEnter { .. }) {
-                        this.reload(window, cx);
-                    }
+                |this, _, event: &InputEvent, window, cx| match event {
+                    // Shift+Enter starts a new line of the condition instead.
+                    InputEvent::PressEnter { shift: false, .. } => this.reload(window, cx),
+                    // The box grows with the condition's lines.
+                    InputEvent::Change => cx.notify(),
+                    _ => {}
                 },
             ),
             // The grid decides what can be edited when it is built; build it
@@ -1195,8 +1213,14 @@ impl TableView {
             .grid
             .as_ref()
             .is_some_and(|grid| grid.read(cx).delegate().editable());
+        // One row fits the toolbar; each further line of the condition adds a
+        // row, up to five, past which the box scrolls.
+        let filter = self.filter.read(cx);
+        let rows = filter.text().lines_len().min(5) as f32;
+        let filter_height = px(24.) + filter.line_height().unwrap_or(px(20.)) * (rows - 1.);
         h_flex()
-            .h_8()
+            .min_h_8()
+            .py_1()
             .flex_shrink_0()
             .gap_2()
             .px_2()
@@ -1226,7 +1250,7 @@ impl TableView {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .child(Input::new(&self.filter).xsmall().cleanable(true)),
+                            .child(Editor::new(&self.filter).xsmall().h(filter_height)),
                     ),
                 // Keeps Refresh at the right edge in both modes.
                 Mode::Structure => toolbar.child(div().flex_1()),

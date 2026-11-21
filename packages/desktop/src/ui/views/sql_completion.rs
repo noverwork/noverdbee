@@ -256,6 +256,15 @@ fn wants_table(head: &str) -> bool {
     })
 }
 
+/// Whether a condition starts after `head`: it ends with WHERE, AND or OR.
+fn wants_column(head: &str) -> bool {
+    let head = head.trim_end();
+    let keyword = &head[head.trim_end_matches(is_word).len()..];
+    ["WHERE", "AND", "OR"]
+        .iter()
+        .any(|column| column.eq_ignore_ascii_case(keyword))
+}
+
 /// `name` as it goes between the quotes of a quoted name.
 fn in_quotes(name: &str) -> String {
     name.replace('"', "\"\"")
@@ -337,8 +346,10 @@ fn suggest(text: &str, offset: usize, tables: &[TableInfo]) -> (usize, Vec<Sugge
         }
         return (start, out);
     }
-    // An empty word would open the menu after every space.
-    if prefix.is_empty() {
+    // An empty word would open the menu after every space; only the start of
+    // a condition offers its columns, and nothing else.
+    let condition = prefix.is_empty();
+    if condition && !wants_column(head) {
         return (start, out);
     }
     if wants_table(head) {
@@ -361,6 +372,9 @@ fn suggest(text: &str, offset: usize, tables: &[TableInfo]) -> (usize, Vec<Sugge
     used.dedup_by(|a, b| a.table == b.table);
     for info in used {
         column(info, &mut out);
+    }
+    if condition {
+        return (start, out);
     }
     for info in tables {
         if starts_with_ignore_case(&info.table.name, prefix) {
@@ -425,7 +439,7 @@ impl CompletionProvider for SqlCompletion {
     }
 
     fn is_completion_trigger(&self, _: usize, new_text: &str, _: &mut App) -> bool {
-        new_text.ends_with(|c: char| c == '.' || is_word(c))
+        new_text.ends_with(|c: char| c == '.' || c.is_whitespace() || is_word(c))
     }
 }
 
@@ -553,5 +567,22 @@ mod tests {
         // A quoted alias, and a quoted name before the word.
         assert_eq!(inserts(r#"SELECT "u".n| FROM users "u""#), ["name"]);
         assert_eq!(inserts(r#"SELECT "name", em| FROM users"#), ["email"]);
+    }
+
+    #[test]
+    fn a_condition_offers_the_columns_of_its_tables() {
+        assert_eq!(
+            inserts("SELECT * FROM users WHERE |"),
+            ["id", "name", "email"]
+        );
+        assert_eq!(
+            inserts("DELETE FROM orders where id = 1 and |"),
+            ["id", "user_id", "total"]
+        );
+        assert_eq!(inserts("UPDATE users SET name = 'a' WHERE em|"), ["email"]);
+        assert_eq!(
+            inserts("SELECT * FROM users WHERE id = |"),
+            Vec::<String>::new()
+        );
     }
 }
