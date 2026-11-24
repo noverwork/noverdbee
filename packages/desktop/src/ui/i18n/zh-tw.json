@@ -84,6 +84,7 @@
  "Results appear here.": "結果會顯示在這裡。",
  "Copy": "複製",
  "Copy row": "複製整列",
+ "View JSON": "檢視 JSON",
  "condition, e.g. id > 100": "條件，例如 id > 100",
  "Discard changes?": "捨棄變更？",
  "Reloading drops the changes that have not been saved.": "重新載入會丟掉尚未儲存的變更。",

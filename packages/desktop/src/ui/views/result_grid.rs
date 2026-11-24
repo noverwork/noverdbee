@@ -3,16 +3,17 @@
 
 use std::cmp::Ordering;
 
+use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::table::{Column, ColumnSort, DataTable, TableDelegate, TableState};
-use gpui_kit::component::{Sizable as _, Size};
+use gpui_kit::component::{Sizable as _, Size, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::db::{self, ResultSet, Value};
 use crate::ui::i18n::t;
 use crate::ui::theme;
-use crate::ui::views::selection::{self, CopyCells, Selectable, Selection};
+use crate::ui::views::selection::{self, CopyCells, Picked, Selectable, Selection};
 
 pub type GridState = TableState<Grid>;
 
@@ -85,15 +86,113 @@ pub fn compare(left: &Value, right: &Value, numeric: bool) -> Ordering {
     }
 }
 
-/// The text of one cell: the value, or the `NULL` marker.
+/// The text of one cell: the value on one line, or the `NULL` marker.
 pub fn cell(value: &Value) -> Div {
     match value {
-        Some(text) => div().truncate().child(SharedString::from(text.clone())),
+        // A line break would grow the cell past its row.
+        Some(text) => div()
+            .truncate()
+            .child(SharedString::from(text.replace(['\r', '\n'], " "))),
         None => div()
             .text_size(px(11.))
             .text_color(theme::STENCIL_FAINT)
             .child("NULL"),
     }
+}
+
+/// The picked cell laid out one member per line, when it is the only one
+/// picked, sits on `row_ix`, and holds a JSON object or array.
+pub fn picked_json<D: Selectable>(grid: &D, row_ix: usize) -> Option<String> {
+    let Some(Picked::Block { rows, cols }) = grid.selection().picked() else {
+        return None;
+    };
+    if rows != (row_ix..row_ix + 1) || cols.len() != 1 {
+        return None;
+    }
+    pretty_json(&grid.value(row_ix, cols.start)?)
+}
+
+/// `text` indented, when it is a JSON object or array. Reindents the text as
+/// it is rather than parsing it, so key order and big numbers stay exact.
+fn pretty_json(text: &str) -> Option<String> {
+    if !text.trim_start().starts_with(['{', '['])
+        || serde_json::from_str::<serde::de::IgnoredAny>(text).is_err()
+    {
+        return None;
+    }
+    let newline = |out: &mut String, depth: usize| {
+        out.push('\n');
+        out.push_str(&"  ".repeat(depth));
+    };
+    let mut out = String::with_capacity(text.len() * 2);
+    let (mut depth, mut in_string, mut escaped) = (0, false, false);
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            match c {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                in_string = true;
+                out.push(c);
+            }
+            '{' | '[' => {
+                out.push(c);
+                while chars.next_if(|c| c.is_whitespace()).is_some() {}
+                // `{}` and `[]` stay on one line.
+                if let Some(close) = chars.next_if(|&c| c == '}' || c == ']') {
+                    out.push(close);
+                } else {
+                    depth += 1;
+                    newline(&mut out, depth);
+                }
+            }
+            '}' | ']' => {
+                depth -= 1;
+                newline(&mut out, depth);
+                out.push(c);
+            }
+            ',' => {
+                out.push(c);
+                newline(&mut out, depth);
+            }
+            ':' => out.push_str(": "),
+            _ if c.is_whitespace() => {}
+            _ => out.push(c),
+        }
+    }
+    Some(out)
+}
+
+/// Adds "View JSON" to a cell's menu when `json` is there.
+pub fn view_json_item(menu: PopupMenu, json: Option<String>) -> PopupMenu {
+    menu.when_some(json, |menu, json| {
+        menu.item(
+            PopupMenuItem::new(t("View JSON"))
+                .on_click(move |_, window, cx| show_json(&json, window, cx)),
+        )
+    })
+}
+
+fn show_json(json: &str, window: &mut Window, cx: &mut App) {
+    let editor = cx.new(|cx| {
+        EditorState::new(window, cx)
+            .language("json")
+            .default_value(json.to_string())
+    });
+    window.open_dialog(cx, move |dialog, _, _| {
+        dialog
+            .title("JSON")
+            .w(px(720.))
+            .child(Editor::new(&editor).readonly(true).h(px(480.)))
+    });
 }
 
 impl Selectable for Grid {
@@ -184,10 +283,12 @@ impl TableDelegate for Grid {
             .picked()
             .filter(|picked| picked.has_row(row_ix));
         let copied = picked.and_then(|_| selection::copied(self, cx));
-        menu.when_some(copied, |menu, text| {
-            menu.item(PopupMenuItem::new(t("Copy")).on_click(copy(text)))
-        })
-        .item(PopupMenuItem::new(t("Copy row")).on_click(copy(self.row_text(row_ix))))
+        let menu = menu
+            .when_some(copied, |menu, text| {
+                menu.item(PopupMenuItem::new(t("Copy")).on_click(copy(text)))
+            })
+            .item(PopupMenuItem::new(t("Copy row")).on_click(copy(self.row_text(row_ix))));
+        view_json_item(menu, picked_json(self, row_ix))
     }
 
     /// The cells draw their own padding, so the header does too.
@@ -294,8 +395,31 @@ pub fn to_csv(result: &ResultSet) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{compare, to_csv};
+    use super::{compare, pretty_json, to_csv};
     use crate::db::{Column, ResultSet};
+
+    #[test]
+    fn pretty_json_keeps_order_numbers_and_strings() {
+        let text = r#"{"z":12345678901234567890,"a":[],"s":"a,b:{\"c\"}","o":{ "x" : [1,{}] }}"#;
+        assert_eq!(
+            pretty_json(text).as_deref(),
+            Some(concat!(
+                "{\n",
+                "  \"z\": 12345678901234567890,\n",
+                "  \"a\": [],\n",
+                "  \"s\": \"a,b:{\\\"c\\\"}\",\n",
+                "  \"o\": {\n",
+                "    \"x\": [\n",
+                "      1,\n",
+                "      {}\n",
+                "    ]\n",
+                "  }\n",
+                "}"
+            ))
+        );
+        assert_eq!(pretty_json("42"), None);
+        assert_eq!(pretty_json("{not json"), None);
+    }
 
     #[test]
     fn csv_quotes_what_needs_it_and_leaves_null_empty() {
