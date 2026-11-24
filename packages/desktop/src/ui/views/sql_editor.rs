@@ -36,15 +36,15 @@ actions!(noverdbee, [SaveFile, FormatSql]);
 const CONTEXT: &str = "SqlEditor";
 
 pub fn bind_keys(cx: &mut App) {
-    let save = if cfg!(target_os = "macos") {
-        "cmd-s"
+    let (save, format) = if cfg!(target_os = "macos") {
+        ("cmd-s", "cmd-i")
     } else {
-        "ctrl-s"
+        ("ctrl-s", "ctrl-i")
     };
     cx.bind_keys([
         KeyBinding::new(save, SaveFile, Some(CONTEXT)),
-        // Cmd+Shift+F is the editor's Replace.
-        KeyBinding::new("alt-shift-f", FormatSql, Some(CONTEXT)),
+        // Cmd+I is TablePlus's Beautify SQL; Cmd+Shift+F is the editor's Replace.
+        KeyBinding::new(format, FormatSql, Some(CONTEXT)),
     ]);
 }
 
