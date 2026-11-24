@@ -384,6 +384,7 @@ impl TableDelegate for EditGrid {
                 menu.item(PopupMenuItem::new(t("Copy")).on_click(copy(text)))
             })
             .item(PopupMenuItem::new(t("Copy row")).on_click(copy(self.row_text(row_ix))));
+        let menu = result_grid::view_json_item(menu, result_grid::picked_json(self, row_ix));
         if !self.editable() {
             return menu;
         }
