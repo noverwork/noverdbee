@@ -8,6 +8,7 @@
 use std::collections::BTreeSet;
 use std::ops::Range;
 
+use gpui_kit::component::menu::{ContextMenu, ContextMenuExt as _};
 use gpui_kit::component::table::{TableDelegate, TableEvent, TableState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -172,15 +173,16 @@ impl Picked<'_> {
     }
 }
 
-/// Covers a whole cell around `content`: shows whether the cell is picked, and
-/// picks it on a press or a drag.
+/// Covers a whole cell around `content`: shows whether the cell is picked,
+/// picks it on a press or a drag, and opens the grid's menu on a right-click.
 pub fn cell_area<D: Selectable>(
     content: impl IntoElement,
     row: usize,
     col: usize,
     picked: bool,
     cx: &mut Context<TableState<D>>,
-) -> Div {
+) -> ContextMenu<Div> {
+    let grid = cx.weak_entity();
     div()
         .size_full()
         .flex()
@@ -188,6 +190,20 @@ pub fn cell_area<D: Selectable>(
         .px_2()
         .when(picked, |cell| cell.bg(theme::picked()))
         .child(div().w_full().min_w_0().child(content))
+        // A right-click outside the picked cells picks the cell under it, so
+        // the menu acts on what was clicked.
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |table, _: &MouseDownEvent, _, cx| {
+                if !table.delegate().selection().contains(row, col) {
+                    table
+                        .delegate_mut()
+                        .selection_mut()
+                        .press((row, col), false, false);
+                    table.set_selected_cell(row, col, cx);
+                }
+            }),
+        )
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |table, event: &MouseDownEvent, _, cx| {
@@ -208,6 +224,14 @@ pub fn cell_area<D: Selectable>(
                 table.set_selected_cell(row, col, cx);
             }
         }))
+        // The table's own menu never opens on a selectable cell: its cell
+        // right-click stops the event before the menu sees it.
+        .context_menu(move |menu, window, cx| match grid.upgrade() {
+            Some(grid) => grid.update(cx, |table, cx| {
+                table.delegate_mut().context_menu(row, menu, window, cx)
+            }),
+            None => menu,
+        })
 }
 
 /// Keeps the picked cells in step with what the table selects from the
