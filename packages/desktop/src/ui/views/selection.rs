@@ -176,7 +176,7 @@ impl Picked<'_> {
 /// Covers a whole cell around `content`: shows whether the cell is picked,
 /// picks it on a press or a drag, and opens the grid's menu on a right-click.
 pub fn cell_area<D: Selectable>(
-    content: impl IntoElement,
+    content: Div,
     row: usize,
     col: usize,
     picked: bool,
@@ -189,7 +189,8 @@ pub fn cell_area<D: Selectable>(
         .items_center()
         .px_2()
         .when(picked, |cell| cell.bg(theme::picked()))
-        .child(div().w_full().min_w_0().child(content))
+        // No wrapper: every element per visible cell costs frame time when scrolling.
+        .child(content.w_full().min_w_0())
         // A right-click outside the picked cells picks the cell under it, so
         // the menu acts on what was clicked.
         .on_mouse_down(

@@ -86,13 +86,23 @@ pub fn compare(left: &Value, right: &Value, numeric: bool) -> Ordering {
     }
 }
 
+/// The most characters a cell shows: the whole text is shaped each time its
+/// row scrolls into view, and no column is this wide.
+const CELL_CHARS: usize = 500;
+
 /// The text of one cell: the value on one line, or the `NULL` marker.
 pub fn cell(value: &Value) -> Div {
     match value {
-        // A line break would grow the cell past its row.
-        Some(text) => div()
-            .truncate()
-            .child(SharedString::from(text.replace(['\r', '\n'], " "))),
+        Some(text) => {
+            let shown = text
+                .char_indices()
+                .nth(CELL_CHARS)
+                .map_or(text.as_str(), |(end, _)| &text[..end]);
+            // A line break would grow the cell past its row.
+            div()
+                .truncate()
+                .child(SharedString::from(shown.replace(['\r', '\n'], " ")))
+        }
         None => div()
             .text_size(px(11.))
             .text_color(theme::STENCIL_FAINT)
